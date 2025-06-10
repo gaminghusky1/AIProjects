@@ -1,17 +1,17 @@
 import numpy as np
 
 def mse(y, y_hat):
-    return np.sum(np.power(y - y_hat, 2)) / y.shape[0]
+    return np.mean(np.power(y - y_hat, 2))
 
 def mse_derivative(y, y_hat):
-    return 2 * (y_hat - y) / y.shape[0]
+    return 2 * (y_hat - y)
 
 def categorical_crossentropy(y, y_hat):
     y_hat = np.clip(y_hat, 1e-12, 1 - 1e-12)
     return -np.sum(y * np.log(y_hat)) / y.shape[0]
 
 def categorical_crossentropy_derivative(y, y_hat):
-    return (y_hat - y) / y.shape[0]
+    return (y_hat - y)
 
 loss_func_dict = {
     'mse': [mse, mse_derivative],

@@ -4,35 +4,41 @@ def linear(x):
     return x
 
 def linear_derivative(x):
-    return 1
+    return np.ones_like(x)
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 def sigmoid_derivative(x):
-    return sigmoid(x) * (1 - sigmoid(x))
+    s = sigmoid(x)
+    return s * (1 - s)
 
 def relu(x):
     return np.maximum(x, 0)
 
 def relu_derivative(x):
-    return (x > 0).astype(int)
+    return (x > 0).astype(x.dtype)
 
 def tanh(x):
     return np.tanh(x)
 
 def tanh_derivative(x):
-    return 1 - np.tanh(x) ** 2
+    th = np.tanh(x)
+    return 1 - th ** 2
 
 def softmax(x):
-    x_stable = x - np.max(x)
+    x_stable = x - np.max(x, axis=-1, keepdims=True)
     exp_x = np.exp(x_stable)
-    return exp_x / np.sum(exp_x)
+    return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
 
 def softmax_derivative(x):
     s = softmax(x)
-    s = s.reshape(-1, 1)
-    return np.diagflat(s) - np.dot(s, s.T)
+    batch_size, n = s.shape
+    jacobians = np.zeros((batch_size, n, n))
+    for i in range(batch_size):
+        s_i = s[i].reshape(-1, 1)
+        jacobians[i] = np.diagflat(s_i) - np.dot(s_i, s_i.T)
+    return jacobians
 
 activation_dict = {
     'linear': [linear, linear_derivative, True],
