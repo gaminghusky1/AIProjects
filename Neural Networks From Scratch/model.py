@@ -30,12 +30,11 @@ class Model:
         for i in reversed(range(len(self.layers))):
             dc_da = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da, batch_size)
 
-    def fit(self, x, y, epochs, learning_rate=0.01, batch_size=1, shuffle=True, output_progress=True):
+    def fit(self, x, y, epochs, learning_rate=0.01, batch_size=1, shuffle=True, verbose=1):
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
-        if output_progress:
-            print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
+        print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
 
         last_layer_shape = self.input_shape
         for layer in self.layers:
@@ -68,11 +67,12 @@ class Model:
                     layer.update_weights_and_biases(learning_rate, curr_batch_size)
 
                 idx += curr_batch_size
+                if verbose > 1:
+                    print(f"Epoch: {i + 1}; Batch: {idx // batch_size + (idx % batch_size != 0)}; Loss: {loss_sum / idx:.5f}; Accuracy: {num_correct / idx:.5f}")
 
-            if output_progress:
+            if verbose > 0:
                 print(f"Epoch {i+1}/{epochs} finished with loss of {loss_sum / data_len:.5f} and accuracy of {num_correct / data_len:.5f}")
-        if output_progress:
-            print("Training completed.")
+        print("Training completed.")
 
     def predict(self, x):
         y_hat = x

@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 import activations
+import sentencepiece as spm
 
 class Dense:
     def __init__(self, units, activation='linear'):
@@ -128,7 +129,7 @@ class Convolution:
         flattened_weights = self.weights.reshape((self.num_filters, self.kernel_stack_size))
         z_output = np.einsum('bok,fk->bfo', windows, flattened_weights)
         z_output = z_output.reshape((batch_size, self.num_filters, *self.output_shape))
-        z_output += self.biases
+        z_output += self.biases[:, np.newaxis, np.newaxis]
         # for f in range(self.num_filters):
         #     weight_matrix = self.weights[f]
         #     bias = self.biases[f]
@@ -241,6 +242,117 @@ class MaxPooling:
                 j_start = j * self.stride
                 prev_dc_da[:, :, i_start:i_start + self.pool_size[0], j_start:j_start + self.pool_size[1]] += max_areas_scaled[:, :, i, j, :, :]
         return prev_dc_da
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        pass
+
+    def get_output_shape(self):
+        return self.output_shape
+
+class Embedding:
+    def __init__(self, vocab_size, embedding_size):
+        self.vocab_size = vocab_size
+        self.embedding_size = embedding_size
+        self.weights = None
+        self.weights_gradient = None
+        self.input_shape = None
+
+    def init_weights(self, last_layer_shape):
+        self.input_shape = last_layer_shape
+        self.weights = np.random.randn(self.vocab_size, self.embedding_size) / np.sqrt(self.embedding_size)
+        self.weights_gradient = np.zeros_like(self.weights)
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        prev_layer_activations = prev_layer_activations.reshape((batch_size, -1))
+        a_output = self.weights[prev_layer_activations]
+
+        return a_output, None
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        dc_da = dc_da.reshape((-1, self.embedding_size))
+
+        np.add.at(self.weights_gradient, prev_layer_activations.ravel(), dc_da)
+
+        return None
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        self.weights -= learning_rate * (self.weights_gradient / batch_size)
+        self.weights_gradient = np.zeros_like(self.weights)
+
+    def get_output_shape(self):
+        return (self.input_shape, self.embedding_size)
+
+class Attention:
+    def __init__(self, d_k, d_v):
+        self.d_k = d_k
+        self.d_v = d_v
+
+        self.sequence_len = None
+        self.d_i = None
+
+        self.w_q = None
+        self.w_k = None
+        self.w_v = None
+
+        self.w_q_gradient = None
+        self.w_k_gradient = None
+        self.w_v_gradient = None
+
+        self.causal_mask = None
+
+        self.input_shape = None
+        self.output_shape = None
+
+
+
+    def init_weights(self, last_layer_shape):
+        self.input_shape = last_layer_shape
+        self.sequence_len = self.input_shape[0]
+        self.d_i = self.input_shape[1]
+        self.output_shape = (self.sequence_len, self.d_v)
+
+        self.w_q = np.random.randn(self.d_i, self.d_k) / np.sqrt(2 / self.d_i)
+        self.w_k = np.random.randn(self.d_i, self.d_k) / np.sqrt(2 / self.d_i)
+        self.w_v = np.random.randn(self.d_i, self.d_v) / np.sqrt(2 / self.d_i)
+
+        self.w_q_gradient = np.zeros_like(self.w_q)
+        self.w_k_gradient = np.zeros_like(self.w_k)
+        self.w_v_gradient = np.zeros_like(self.w_v)
+
+        # Upper triangle of -inf so softmax will not let k_i attend to q_j for i > j (dimension is j*i).
+        self.causal_mask = np.triu(np.ones_like((self.sequence_len, self.sequence_len)), k=1) * -1e9
+
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        # t and s are both sequence_length, this is just to distinguish the q dimension and the k dimension for einsum.
+        q = np.einsum('ik,bti->btk', self.w_q, prev_layer_activations)
+        k = np.einsum('ik,bsi->bsk', self.w_k, prev_layer_activations)
+        v = np.einsum('iv,bsi->bsv', self.w_v, prev_layer_activations)
+
+        raw_scores = np.einsum('btk,bsk->bts', q, k) / np.sqrt(self.d_k)
+        raw_scores += self.causal_mask
+
+        attention_scores = activations.softmax(raw_scores)
+
+        a_output = np.einsum('bts,bsv->btv', attention_scores, v)
+
+        return a_output, (raw_scores, attention_scores, v)
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        raw_scores, attention_scores, v = curr_layer_z
+        dc_dv = np.einsum('bsv,bst->btv', dc_da, attention_scores)
+        self.w_v_gradient += np.einsum('bsv,bsi->iv', dc_dv, prev_layer_activations)
+
+        dc_dattention_scores = np.einsum('bsv,btv->st', dc_da, v)
+
 
     def update_weights_and_biases(self, learning_rate, batch_size):
         pass

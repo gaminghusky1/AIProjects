@@ -1,0 +1,21 @@
+import numpy as np
+
+def main():
+    a = np.array([
+        [
+            [1, 2, 3],
+            [3, 4, 5]
+        ]
+    ])
+
+    b = np.array([
+        [
+            [5, 6, 7],
+            [7, 8, 9]
+        ]
+    ])
+
+    print(np.einsum('bsv,btv->st', a, b))
+
+if __name__ == '__main__':
+    main()
