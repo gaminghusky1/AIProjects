@@ -40,6 +40,14 @@ def softmax_derivative(x):
         jacobians[i] = np.diagflat(s_i) - np.dot(s_i, s_i.T)
     return jacobians
 
+def transformer_softmax_derivative(x):
+    s = softmax(x)
+    b, n, m = s.shape
+    diag_indices = np.arange(m)
+    diags = np.zeros((b, n, m, m), dtype=s.dtype)
+    diags[:, :, diag_indices, diag_indices] = s
+    return diags - np.einsum('bni,bnj->bnij', s, s)
+
 activation_dict = {
     'linear': [linear, linear_derivative, True],
     'sigmoid': [sigmoid, sigmoid_derivative, True],

@@ -287,7 +287,7 @@ class Embedding:
         return (self.input_shape, self.embedding_size)
 
 class Attention:
-    def __init__(self, d_k, d_v):
+    def __init__(self, d_k, d_v, mask=None):
         self.d_k = d_k
         self.d_v = d_v
 
@@ -302,7 +302,7 @@ class Attention:
         self.w_k_gradient = None
         self.w_v_gradient = None
 
-        self.causal_mask = None
+        self.mask = mask
 
         self.input_shape = None
         self.output_shape = None
@@ -323,8 +323,8 @@ class Attention:
         self.w_k_gradient = np.zeros_like(self.w_k)
         self.w_v_gradient = np.zeros_like(self.w_v)
 
-        # Upper triangle of -inf so softmax will not let k_i attend to q_j for i > j (dimension is j*i).
-        self.causal_mask = np.triu(np.ones_like((self.sequence_len, self.sequence_len)), k=1) * -1e9
+        # # Upper triangle of -inf so softmax will not let k_i attend to q_j for i > j (dimension is j*i).
+        # self.causal_mask = np.triu(np.ones_like((self.sequence_len, self.sequence_len)), k=1) * -1e9
 
 
     def get_output(self, prev_layer_activations, batch_size=1):
@@ -338,24 +338,44 @@ class Attention:
         v = np.einsum('iv,bsi->bsv', self.w_v, prev_layer_activations)
 
         raw_scores = np.einsum('btk,bsk->bts', q, k) / np.sqrt(self.d_k)
-        raw_scores += self.causal_mask
+        raw_scores = np.where(self.mask, -1e9, raw_scores)
 
         attention_scores = activations.softmax(raw_scores)
 
         a_output = np.einsum('bts,bsv->btv', attention_scores, v)
 
-        return a_output, (raw_scores, attention_scores, v)
+        return a_output, (raw_scores, attention_scores, q, k, v)
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
-        raw_scores, attention_scores, v = curr_layer_z
+        raw_scores, attention_scores, q, k, v = curr_layer_z
         dc_dv = np.einsum('bsv,bst->btv', dc_da, attention_scores)
         self.w_v_gradient += np.einsum('bsv,bsi->iv', dc_dv, prev_layer_activations)
 
-        dc_dattention_scores = np.einsum('bsv,btv->st', dc_da, v)
+        dc_dattention_scores = np.einsum('bsv,btv->bts', dc_da, v)
+        dattention_scores_draw_scores = activations.transformer_softmax_derivative(raw_scores)
+
+        dc_draw_scores = np.einsum('bts,btss->bts', dc_dattention_scores, dattention_scores_draw_scores)
+        if self.mask is not None:
+            dc_draw_scores = np.where(self.mask, 0, dc_draw_scores)
+
+        dc_dq = np.einsum('bts,bsk->btk', dc_draw_scores, k) / np.sqrt(self.d_k)
+        dc_dk = np.einsum('bts,btk->bsk', dc_draw_scores, q) / np.sqrt(self.d_k)
+
+        self.w_q_gradient += np.einsum('btk,bti->ik', dc_dq, prev_layer_activations)
+        self.w_k_gradient += np.einsum('bsk,bsi->ik', dc_dk, prev_layer_activations)
+
+        dc_dprev_layer_activations = np.einsum('btk,ik->bti', dc_dq, self.w_q) + np.einsum('bsk,ik->bsi', dc_dk, self.w_k) + np.einsum('bsv,iv->bsi', dc_dv, self.w_v)
+        return dc_dprev_layer_activations
 
 
     def update_weights_and_biases(self, learning_rate, batch_size):
-        pass
+        self.w_q -= learning_rate * (self.w_q_gradient / batch_size)
+        self.w_k -= learning_rate * (self.w_k_gradient / batch_size)
+        self.w_v -= learning_rate * (self.w_v_gradient / batch_size)
+
+        self.w_q_gradient = np.zeros_like(self.w_q)
+        self.w_k_gradient = np.zeros_like(self.w_k)
+        self.w_v_gradient = np.zeros_like(self.w_v)
 
     def get_output_shape(self):
         return self.output_shape
