@@ -15,7 +15,7 @@ def main():
     print(tokens)
     embedding_test_model = model.Model(
         L,
-            layers.Embedding(sp.GetPieceSize(), 50),
+            layers.TokenEmbedding(sp.GetPieceSize(), 50),
         layers.Dense(sp.GetPieceSize(), activation="softmax")
     )
 

@@ -13,21 +13,22 @@ def main():
         ]
     ])
 
-    b = np.array([
-        [1, 2, 3],
-        [4, 5, 6]
-    ])
-
     # b = np.array([
-    #     [
-    #         [5, 6],
-    #         [7, 8]
-    #     ],
-    #     [
-    #         [5, 6],
-    #         [7, 8]
-    #     ]
+    #     [1, 2],
+    #     [3, 4],
+    #     [5, 6]
     # ])
+
+    b = np.array([
+        [
+            [5, 6, 7],
+            [7, 8, 9]
+        ],
+        [
+            [5, 6, 7],
+            [7, 8, 9]
+        ]
+    ])
 
     # sm_deriv_a = activations.transformer_softmax_derivative(a)
 
@@ -42,7 +43,9 @@ def main():
     # # print(diags)
     # print(diags - np.einsum('bni,bnj->bnij', a, a))
 
-    print(np.einsum('btk,ik->bti', a, b))
+    # print(np.einsum('btk,ik->bti', a, b))
+
+    print(np.einsum('bsv,btv->bst', a, b))
 
 if __name__ == '__main__':
     main()
