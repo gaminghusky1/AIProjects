@@ -58,8 +58,8 @@ class Model:
                 y_batch = y[idx:idx + curr_batch_size]
 
                 a_outputs, z_outputs = self.forward_propagate(x_batch, curr_batch_size)
-                loss_sum += np.sum(self.loss_func(y_batch, a_outputs[-1]))
-                num_correct += np.sum(np.argmax(a_outputs[-1], axis=1) == np.argmax(y_batch, axis=1))
+                loss_sum += np.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size
+                num_correct += np.mean(np.argmax(a_outputs[-1], axis=-1) == np.argmax(y_batch, axis=-1)) * curr_batch_size
 
                 self.backward_propagate(a_outputs, z_outputs, y_batch, curr_batch_size)
 

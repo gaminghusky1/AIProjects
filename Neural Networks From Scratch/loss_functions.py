@@ -8,14 +8,19 @@ def mse_derivative(y, y_hat):
 
 def categorical_crossentropy(y, y_hat):
     y_hat = np.clip(y_hat, 1e-12, 1 - 1e-12)
-    return -np.sum(y * np.log(y_hat)) / y.shape[0]
+    return -np.sum(y * np.log(y_hat)) / (np.prod(y.shape) / y.shape[-1])
 
 def categorical_crossentropy_derivative(y, y_hat):
-    return (y_hat - y)
+    y_hat = np.clip(y_hat, 1e-12, 1 - 1e-12)
+    return (-y / y_hat) / (np.prod(y.shape) / y.shape[-1])
+
+def softmax_crossentropy_derivative(y, y_hat):
+    return (y_hat - y) / (np.prod(y.shape) / y.shape[-1])
 
 loss_func_dict = {
     'mse': [mse, mse_derivative],
-    'categorical_crossentropy': [categorical_crossentropy, categorical_crossentropy_derivative]
+    'categorical_crossentropy': [categorical_crossentropy, categorical_crossentropy_derivative],
+    'softmax_crossentropy': [categorical_crossentropy, softmax_crossentropy_derivative],
 }
 
 class LossFunction:

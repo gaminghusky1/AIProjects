@@ -53,8 +53,8 @@ class Dense:
         return np.dot(dc_dz, self.weights.T)
 
     def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights -= learning_rate * (self.weights_gradient / batch_size)
-        self.biases -= learning_rate * (self.biases_gradient / batch_size)
+        self.weights -= learning_rate * self.weights_gradient
+        self.biases -= learning_rate * self.biases_gradient
 
         self.weights_gradient = np.zeros_like(self.weights)
         self.biases_gradient = np.zeros_like(self.biases)
@@ -169,8 +169,8 @@ class Convolution:
         return dc_da
 
     def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights -= learning_rate * (self.weights_gradient / batch_size)
-        self.biases -= learning_rate * (self.biases_gradient / batch_size)
+        self.weights -= learning_rate * self.weights_gradient
+        self.biases -= learning_rate * self.biases_gradient
 
         self.weights_gradient = np.zeros_like(self.weights)
         self.biases_gradient = np.zeros_like(self.biases)
@@ -280,11 +280,11 @@ class TokenEmbedding:
         return None
 
     def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights -= learning_rate * (self.weights_gradient / batch_size)
+        self.weights -= learning_rate * self.weights_gradient
         self.weights_gradient = np.zeros_like(self.weights)
 
     def get_output_shape(self):
-        return (self.sequence_len, self.embedding_size)
+        return (*self.sequence_len, self.embedding_size)
 
 class PositionalEmbedding:
     def __init__(self, max_sequence_len=512):
@@ -318,11 +318,66 @@ class PositionalEmbedding:
         return dc_da
 
     def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights -= learning_rate * (self.weights_gradient / batch_size)
+        self.weights -= learning_rate * self.weights_gradient
         self.weights_gradient = np.zeros_like(self.weights)
 
     def get_output_shape(self):
         return self.input_shape
+
+class LayerNorm:
+    def __init__(self, epsilon=1e-5):
+        self.epsilon = epsilon
+        self.scale = None
+        self.scale_gradient = None
+        self.shift = None
+        self.shift_gradient = None
+        self.input_shape = None
+        self.sequence_len = None
+
+    def init_weights(self, last_layer_shape):
+        self.input_shape = last_layer_shape
+        self.sequence_len = self.input_shape[0]
+        self.scale = np.ones(self.input_shape[1])
+        self.shift = np.zeros(self.input_shape[1])
+
+        self.scale_gradient = np.zeros_like(self.scale)
+        self.shift_gradient = np.zeros_like(self.shift)
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        numerator_term = prev_layer_activations - np.mean(prev_layer_activations, axis=2, keepdims=True)
+        denominator_term = np.sqrt(prev_layer_activations.var(axis=2, keepdims=True) + self.epsilon)
+
+        x_hat = numerator_term / denominator_term
+
+        a_output = self.scale * x_hat + self.shift
+
+        return a_output, (x_hat, denominator_term)
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        x_hat, denominator_term = curr_layer_z
+
+        self.scale_gradient += np.sum(dc_da * x_hat, axis=(0, 1))
+        self.shift_gradient += np.sum(dc_da, axis=(0, 1))
+
+        g = dc_da * self.scale
+
+        dc_dprev_layer_activations = (g - g.mean(axis=2, keepdims=True) - x_hat * np.mean(g * x_hat, axis=2, keepdims=True)) / denominator_term
+        return dc_dprev_layer_activations
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        self.scale -= learning_rate * self.scale_gradient
+        self.shift -= learning_rate * self.shift_gradient
+
+        self.scale_gradient = np.zeros_like(self.scale)
+        self.shift_gradient = np.zeros_like(self.shift)
+
+    def get_output_shape(self):
+        return self.input_shape
+
 
 class Attention:
     def __init__(self, d_k, d_v, heads=1, mask=None):
@@ -330,7 +385,6 @@ class Attention:
         self.d_v = d_v
         self.heads = heads
 
-        self.sequence_len = None
         self.d_i = None
 
         self.w_q = None
@@ -351,7 +405,6 @@ class Attention:
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
-        self.sequence_len = self.input_shape[0]
         self.d_i = self.input_shape[1]
 
         self.w_q = np.random.randn(self.d_i, self.d_k) / np.sqrt(2 / self.d_i)
@@ -372,25 +425,30 @@ class Attention:
         return a_output
 
     def forward_pass(self, prev_layer_activations, batch_size):
+        sequence_len = prev_layer_activations.shape[1]
         # t and s are both sequence_length, this is just to distinguish the q dimension and the k dimension for einsum.
         q = np.einsum('ik,bti->btk', self.w_q, prev_layer_activations)
         k = np.einsum('ik,bsi->bsk', self.w_k, prev_layer_activations)
         v = np.einsum('iv,bsi->bsv', self.w_v, prev_layer_activations)
+        # print("q before:", q.shape)
 
         # split each into heads for multihead attention
-        q = np.reshape(q, (batch_size, self.sequence_len, self.heads, -1)).transpose(0, 2, 1, 3)
-        k = np.reshape(k, (batch_size, self.sequence_len, self.heads, -1)).transpose(0, 2, 1, 3)
-        v = np.reshape(v, (batch_size, self.sequence_len, self.heads, -1)).transpose(0, 2, 1, 3)
+        q = np.reshape(q, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
+        # print("q after:", q.shape)
+        k = np.reshape(k, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
+        v = np.reshape(v, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
 
         raw_scores = np.einsum('bhtk,bhsk->bhts', q, k) / np.sqrt(self.d_k // self.heads)
         if self.mask is not None:
-            raw_scores = np.where(self.mask(self.sequence_len), -1e9, raw_scores)
+            raw_scores = np.where(self.mask(sequence_len), -1e9, raw_scores)
 
         attention_scores = activations.softmax(raw_scores)
 
         z_output = np.einsum('bhts,bhsv->bhtv', attention_scores, v)
-        z_output = z_output.transpose(0, 2, 1, 3).reshape((batch_size, self.sequence_len, -1))
+        z_output = z_output.transpose((0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
 
+        # print("z_output shape:", z_output.shape)
+        # print("w_o shape:", self.w_o.shape)
         a_output = np.einsum('vi,btv->bti', self.w_o, z_output)
         a_output += self.b_o
 
@@ -398,15 +456,16 @@ class Attention:
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
         raw_scores, attention_scores, q, k, v, z_output = curr_layer_z
+        sequence_len = prev_layer_activations.shape[1]
 
         self.w_o_gradient += np.einsum('bsi,bsv->vi', dc_da, z_output)
         self.b_o_gradient += np.sum(dc_da, axis=(0, 1))
 
         dc_dz = np.einsum('bsi,vi->bsv', dc_da, self.w_o)
-        dc_dz = np.reshape(dc_dz, (batch_size, self.sequence_len, self.heads, -1)).transpose(0, 2, 1, 3)
+        dc_dz = np.reshape(dc_dz, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
 
         dc_dv = np.einsum('bhtv,bhts->bhsv', dc_dz, attention_scores)
-        dc_dv = np.transpose(dc_dv, (0, 2, 1, 3)).reshape((batch_size, self.sequence_len, -1))
+        dc_dv = np.transpose(dc_dv, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
         self.w_v_gradient += np.einsum('bsv,bsi->iv', dc_dv, prev_layer_activations)
 
         dc_dattention_scores = np.einsum('bhtv,bhsv->bhts', dc_dz, v)
@@ -414,13 +473,13 @@ class Attention:
 
         dc_draw_scores = np.einsum('bhts,bhtss->bhts', dc_dattention_scores, dattention_scores_draw_scores)
         if self.mask is not None:
-            dc_draw_scores = np.where(self.mask(self.sequence_len), 0, dc_draw_scores)
+            dc_draw_scores = np.where(self.mask(sequence_len), 0, dc_draw_scores)
 
         dc_dq = np.einsum('bhts,bhsk->bhtk', dc_draw_scores, k) / np.sqrt(self.d_k // self.heads)
         dc_dk = np.einsum('bhts,bhtk->bhsk', dc_draw_scores, q) / np.sqrt(self.d_k // self.heads)
 
-        dc_dq = np.transpose(dc_dq, (0, 2, 1, 3)).reshape((batch_size, self.sequence_len, -1))
-        dc_dk = np.transpose(dc_dk, (0, 2, 1, 3)).reshape((batch_size, self.sequence_len, -1))
+        dc_dq = np.transpose(dc_dq, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
+        dc_dk = np.transpose(dc_dk, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
 
         self.w_q_gradient += np.einsum('btk,bti->ik', dc_dq, prev_layer_activations)
         self.w_k_gradient += np.einsum('bsk,bsi->ik', dc_dk, prev_layer_activations)
@@ -430,11 +489,11 @@ class Attention:
 
 
     def update_weights_and_biases(self, learning_rate, batch_size):
-        self.w_q -= learning_rate * (self.w_q_gradient / (batch_size * self.sequence_len))
-        self.w_k -= learning_rate * (self.w_k_gradient / (batch_size * self.sequence_len))
-        self.w_v -= learning_rate * (self.w_v_gradient / (batch_size * self.sequence_len))
-        self.w_o -= learning_rate * (self.w_o_gradient / (batch_size * self.sequence_len))
-        self.b_o -= learning_rate * (self.b_o_gradient / (batch_size * self.sequence_len))
+        self.w_q -= learning_rate * self.w_q_gradient
+        self.w_k -= learning_rate * self.w_k_gradient
+        self.w_v -= learning_rate * self.w_v_gradient
+        self.w_o -= learning_rate * self.w_o_gradient
+        self.b_o -= learning_rate * self.b_o_gradient
 
         self.w_q_gradient = np.zeros_like(self.w_q)
         self.w_k_gradient = np.zeros_like(self.w_k)
@@ -462,12 +521,10 @@ class MultilayerPerceptron:
         self.down_biases_gradient = None
 
         self.input_shape = None
-        self.sequence_len = None
         self.d_i = None
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
-        self.sequence_len = last_layer_shape[0]
         self.d_i = self.input_shape[1]
 
         self.up_weights = np.random.randn(self.d_ff, self.d_i) / np.sqrt(2 / self.d_i)
@@ -493,7 +550,7 @@ class MultilayerPerceptron:
         a_output = np.einsum('if,bsf->bsi', self.down_weights, activated_ff)
         a_output += self.down_biases
 
-        a_output += prev_layer_activations
+        # a_output += prev_layer_activations
 
         return a_output, (raw_ff, activated_ff)
 
@@ -509,19 +566,116 @@ class MultilayerPerceptron:
         self.up_weights_gradient += np.einsum('bsf,bsi->fi', dc_draw_ff, prev_layer_activations)
         self.up_biases_gradient += np.sum(dc_draw_ff, axis=(0, 1))
 
-        dc_da += np.einsum('fi,bsf->bsi', self.up_weights, dc_draw_ff)
-        return dc_da
+        # dc_da += np.einsum('fi,bsf->bsi', self.up_weights, dc_draw_ff)
+        dc_dprev_layer_activations = np.einsum('fi,bsf->bsi', self.up_weights, dc_draw_ff)
+        return dc_dprev_layer_activations
 
     def update_weights_and_biases(self, learning_rate, batch_size):
-        self.up_weights -= learning_rate * (self.up_weights_gradient / (batch_size * self.sequence_len))
-        self.up_biases -= learning_rate * (self.up_biases_gradient / (batch_size * self.sequence_len))
+        self.up_weights -= learning_rate * self.up_weights_gradient
+        self.up_biases -= learning_rate * self.up_biases_gradient
         self.up_weights_gradient = np.zeros_like(self.up_weights)
         self.up_biases_gradient = np.zeros_like(self.up_biases)
 
-        self.down_weights -= learning_rate * (self.down_weights_gradient / (batch_size * self.sequence_len))
-        self.down_biases -= learning_rate * (self.down_biases_gradient / (batch_size * self.sequence_len))
+        self.down_weights -= learning_rate * self.down_weights_gradient
+        self.down_biases -= learning_rate * self.down_biases_gradient
         self.down_weights_gradient = np.zeros_like(self.down_weights)
         self.down_biases_gradient = np.zeros_like(self.down_biases)
+
+    def get_output_shape(self):
+        return self.input_shape
+
+class ResidualBlock:
+    def __init__(self, *layers):
+        self.layers = layers
+        self.output_shape = None
+
+    def init_weights(self, last_layer_shape):
+        for layer in self.layers:
+            layer.init_weights(last_layer_shape)
+            last_layer_shape = layer.get_output_shape()
+        self.output_shape = last_layer_shape
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_outputs = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        a_outputs = [prev_layer_activations]
+        z_outputs = []
+        for layer in self.layers:
+            a_output, z_output = layer.forward_pass(a_outputs[-1], batch_size)
+            a_outputs.append(a_output)
+            z_outputs.append(z_output)
+        a_outputs[-1] += prev_layer_activations
+        return a_outputs[-1], (a_outputs, z_outputs)
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        a_outputs, z_outputs = curr_layer_z
+        dc_da_curr = dc_da
+        for i in reversed(range(len(self.layers))):
+            dc_da_curr = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da_curr, batch_size)
+        return dc_da_curr + dc_da
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        for layer in self.layers:
+            layer.update_weights_and_biases(learning_rate, batch_size)
+
+    def get_output_shape(self):
+        return self.output_shape
+
+class TimeDistributedDense:
+    def __init__(self, units, activation='linear'):
+        self.activation_name = activation
+        self.activation = activations.Activation(activation)
+
+        self.units = units
+
+        self.weights = None
+        self.weights_gradient = None
+        self.biases = None
+        self.biases_gradient = None
+
+        self.input_shape = None
+        self.d_i = None
+
+    def init_weights(self, last_layer_shape):
+        self.input_shape = last_layer_shape
+        self.d_i = self.input_shape[1]
+
+        self.weights = np.random.randn(self.units, self.d_i) / np.sqrt(2 / self.d_i)
+        self.weights_gradient = np.zeros_like(self.weights)
+        self.biases = np.zeros(self.units)
+        self.biases_gradient = np.zeros_like(self.biases)
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        z_output = np.einsum('oi,bsi->bso', self.weights, prev_layer_activations)
+        z_output += self.biases
+
+        a_output = self.activation(z_output)
+
+        return a_output, z_output
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        if self.activation.elementwise:
+            dc_dz = dc_da * self.activation.derivative(curr_layer_z)
+        else:
+            dc_dz = np.einsum('bso,bsoo->bso', dc_da, self.activation.derivative(curr_layer_z))
+
+        self.weights_gradient += np.einsum('bso,bsi->oi', dc_dz, prev_layer_activations)
+        self.biases_gradient += np.sum(dc_dz, axis=(0, 1))
+
+        dc_dprev_layer_activations = np.einsum('oi,bso->bsi', self.weights, dc_dz)
+        return dc_dprev_layer_activations
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        self.weights -= learning_rate * self.weights_gradient
+        self.biases -= learning_rate * self.biases_gradient
+        self.weights_gradient = np.zeros_like(self.weights)
+        self.biases_gradient = np.zeros_like(self.biases)
 
     def get_output_shape(self):
         return self.input_shape

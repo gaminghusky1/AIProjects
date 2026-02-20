@@ -40,6 +40,14 @@ def softmax_derivative(x):
         jacobians[i] = np.diagflat(s_i) - np.dot(s_i, s_i.T)
     return jacobians
 
+def time_distributed_softmax_derivative(x):
+    s = softmax(x)
+    b, n, m = s.shape
+    diag_indices = np.arange(m)
+    diags = np.zeros((b, n, m, m), dtype=s.dtype)
+    diags[:, :, diag_indices, diag_indices] = s
+    return diags - np.einsum('bni,bnj->bnij', s, s)
+
 def attention_softmax_derivative(x):
     s = softmax(x)
     b, h, n, m = s.shape
@@ -53,7 +61,9 @@ activation_dict = {
     'sigmoid': [sigmoid, sigmoid_derivative, True],
     'relu': [relu, relu_derivative, True],
     'tanh': [tanh, tanh_derivative, True],
-    'softmax': [softmax, softmax_derivative, False]
+    'softmax': [softmax, softmax_derivative, False],
+    'time_distributed_softmax': [softmax, time_distributed_softmax_derivative, False],
+    'crossentropy_softmax': [softmax, linear_derivative, True],
 }
 
 class Activation:
