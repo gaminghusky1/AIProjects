@@ -407,10 +407,10 @@ class Attention:
         self.input_shape = last_layer_shape
         self.d_i = self.input_shape[1]
 
-        self.w_q = np.random.randn(self.d_i, self.d_k) / np.sqrt(2 / self.d_i)
-        self.w_k = np.random.randn(self.d_i, self.d_k) / np.sqrt(2 / self.d_i)
-        self.w_v = np.random.randn(self.d_i, self.d_v) / np.sqrt(2 / self.d_i)
-        self.w_o = np.random.randn(self.d_v, self.d_i) / np.sqrt(2 / self.d_v)
+        self.w_q = np.random.randn(self.d_i, self.d_k) * np.sqrt(2 / self.d_i)
+        self.w_k = np.random.randn(self.d_i, self.d_k) * np.sqrt(2 / self.d_i)
+        self.w_v = np.random.randn(self.d_i, self.d_v) * np.sqrt(2 / self.d_i)
+        self.w_o = np.random.randn(self.d_v, self.d_i) * np.sqrt(2 / self.d_v)
         self.b_o = np.zeros(self.d_i)
 
         self.w_q_gradient = np.zeros_like(self.w_q)
@@ -527,12 +527,12 @@ class MultilayerPerceptron:
         self.input_shape = last_layer_shape
         self.d_i = self.input_shape[1]
 
-        self.up_weights = np.random.randn(self.d_ff, self.d_i) / np.sqrt(2 / self.d_i)
+        self.up_weights = np.random.randn(self.d_ff, self.d_i) * np.sqrt(2 / self.d_i)
         self.up_weights_gradient = np.zeros_like(self.up_weights)
         self.up_biases = np.zeros(self.d_ff)
         self.up_biases_gradient = np.zeros_like(self.up_biases)
 
-        self.down_weights = np.random.randn(self.d_i, self.d_ff) / np.sqrt(2 / self.d_ff)
+        self.down_weights = np.random.randn(self.d_i, self.d_ff) * np.sqrt(2 / self.d_ff)
         self.down_weights_gradient = np.zeros_like(self.down_weights)
         self.down_biases = np.zeros(self.d_i)
         self.down_biases_gradient = np.zeros_like(self.down_biases)
@@ -642,7 +642,7 @@ class TimeDistributedDense:
         self.input_shape = last_layer_shape
         self.d_i = self.input_shape[1]
 
-        self.weights = np.random.randn(self.units, self.d_i) / np.sqrt(2 / self.d_i)
+        self.weights = np.random.randn(self.units, self.d_i) * np.sqrt(2 / self.d_i)
         self.weights_gradient = np.zeros_like(self.weights)
         self.biases = np.zeros(self.units)
         self.biases_gradient = np.zeros_like(self.biases)

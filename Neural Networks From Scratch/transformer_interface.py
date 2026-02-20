@@ -30,7 +30,7 @@ def main():
 
             model_output_text += sp.DecodeIds([model_output_token])
             previous_tokens.append(model_output_token)
-            print(model_output_text, "\n")
+            # print(model_output_text, "\n")
 
         previous_tokens.extend(sp.EncodeAsIds("\n"))
         print(model_output_text.rstrip(" "))
