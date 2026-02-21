@@ -1,7 +1,5 @@
 import numpy as np
-import layers
-import model
-import masks
+from base_model import *
 import sentencepiece as spm
 import pickle
 # np.seterr(all="raise")
@@ -85,10 +83,18 @@ def load_data(
     return x, y, vocab_size
 
 def main():
-    block_size = 128
-    train_data, test_data, vocab_size = load_data("TransformerData/conversations.txt", block_size=block_size)
+    block_size = 32
+    x_train, y_train, vocab_size = load_data("TransformerData/conversations.txt", block_size=block_size)
+    # sp = spm.SentencePieceProcessor()
+    # sp.Load("TransformerData/spm_openwebtext_wikitext.model")
+    # vocab_size = sp.GetPieceSize()
+    # x_train = np.load(f"TransformerData/x_train_T{block_size}.npy")
+    # y_train = np.load(f"TransformerData/y_train_T{block_size}.npy")
+    # x_test = np.load(f"TransformerData/x_val_T{block_size}.npy")
+    # y_test = np.load(f"TransformerData/y_val_T{block_size}.npy")
     d_model = 512
     d_ff = 4 * d_model
+    head_count = 8
     transformer_model = model.Model(
         (block_size,),
         layers.TokenEmbedding(vocab_size, d_model),
@@ -96,40 +102,42 @@ def main():
 
         layers.ResidualBlock(
             layers.LayerNorm(),
-            layers.Attention(d_model, d_model, heads=8, mask=masks.causal),
+            layers.Attention(d_model, d_model, heads=head_count, mask=masks.causal),
         ),
         layers.ResidualBlock(
             layers.LayerNorm(),
-            layers.MultilayerPerceptron(d_ff, activation='relu')
-        ),
-
-        layers.ResidualBlock(
-            layers.LayerNorm(),
-            layers.Attention(d_model, d_model, heads=8, mask=masks.causal),
-        ),
-        layers.ResidualBlock(
-            layers.LayerNorm(),
-            layers.MultilayerPerceptron(d_ff, activation='relu')
+            layers.MultilayerPerceptron(d_ff, activation='gelu')
         ),
 
         layers.ResidualBlock(
             layers.LayerNorm(),
-            layers.Attention(d_model, d_model, heads=8, mask=masks.causal),
+            layers.Attention(d_model, d_model, heads=head_count, mask=masks.causal),
         ),
         layers.ResidualBlock(
             layers.LayerNorm(),
-            layers.MultilayerPerceptron(d_ff, activation='relu')
+            layers.MultilayerPerceptron(d_ff, activation='gelu')
+        ),
+
+        layers.ResidualBlock(
+            layers.LayerNorm(),
+            layers.Attention(d_model, d_model, heads=head_count, mask=masks.causal),
+        ),
+        layers.ResidualBlock(
+            layers.LayerNorm(),
+            layers.MultilayerPerceptron(d_ff, activation='gelu')
         ),
 
         layers.LayerNorm(),
         layers.TimeDistributedDense(vocab_size, activation='crossentropy_softmax')
     )
 
-    transformer_model.compile(loss='softmax_crossentropy')
+    transformer_model.compile(loss='softmax_crossentropy', optimizer='adam')
 
-    transformer_model.fit(train_data, test_data, epochs=10, learning_rate=0.005, batch_size=1, verbose=2)
+    transformer_model.fit(x_train, y_train, epochs=20, learning_rate=0.005, batch_size=1, verbose=2, y_ohe=True, save_after_each_epoch=False, path="Models/transformer_model_20_epochs")
 
-    transformer_model.save_as("Models/transformer_test")
+    # print("Accuracy on test dataset:", transformer_model.test(x_test, y_test, y_ohe=False))
+
+    transformer_model.save_as("Models/transformer_model_20_epochs")
 
 if __name__ == "__main__":
     main()

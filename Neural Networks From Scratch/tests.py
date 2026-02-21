@@ -1,5 +1,5 @@
 import numpy as np
-import activations
+
 
 def main():
     a = np.array([

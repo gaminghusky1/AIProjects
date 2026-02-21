@@ -1,7 +1,6 @@
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-import activations
-import sentencepiece as spm
+from base_model import activations
 
 class Dense:
     def __init__(self, units, activation='linear'):
@@ -56,8 +55,18 @@ class Dense:
         self.weights -= learning_rate * self.weights_gradient
         self.biases -= learning_rate * self.biases_gradient
 
+    def reset_grads(self):
         self.weights_gradient = np.zeros_like(self.weights)
         self.biases_gradient = np.zeros_like(self.biases)
+
+    def get_params(self):
+        return [self.weights, self.biases]
+
+    def get_grads(self):
+        return [self.weights_gradient, self.biases_gradient]
+
+    def get_param_count(self):
+        return np.prod(self.weights.shape) + np.prod(self.biases.shape)
 
     def get_output_shape(self):
         return self.units
@@ -163,7 +172,7 @@ class Convolution:
         # dz_dw = np.reshape(dz_dw, (self.num_filters, self.kernel_stack_size, -1))
 
         dc_dw = np.einsum('bfo,bok->fk', dc_dz, windows)
-        self.weights_gradient += dc_dw.reshape(self.num_filters, *self.kernel_stack_shape)
+        self.weights_gradient += dc_dw.reshape((self.num_filters, *self.kernel_stack_shape))
         self.biases_gradient += np.sum(dc_dz, axis=(0, 2))
         dc_da = np.einsum('bfo,foi->bi', dc_dz, self.dz_da)
         return dc_da
@@ -172,10 +181,20 @@ class Convolution:
         self.weights -= learning_rate * self.weights_gradient
         self.biases -= learning_rate * self.biases_gradient
 
+    def reset_grads(self):
         self.weights_gradient = np.zeros_like(self.weights)
         self.biases_gradient = np.zeros_like(self.biases)
 
         self.precompute_dz_da()
+
+    def get_params(self):
+        return [self.weights, self.biases]
+
+    def get_grads(self):
+        return [self.weights_gradient, self.biases_gradient]
+
+    def get_param_count(self):
+        return np.prod(self.weights.shape) + np.prod(self.biases.shape)
 
     def get_output_shape(self):
         return self.stacked_output_shape
@@ -246,6 +265,18 @@ class MaxPooling:
     def update_weights_and_biases(self, learning_rate, batch_size):
         pass
 
+    def reset_grads(self):
+        pass
+
+    def get_params(self):
+        return []
+
+    def get_grads(self):
+        return []
+
+    def get_param_count(self):
+        return 0
+
     def get_output_shape(self):
         return self.output_shape
 
@@ -281,7 +312,18 @@ class TokenEmbedding:
 
     def update_weights_and_biases(self, learning_rate, batch_size):
         self.weights -= learning_rate * self.weights_gradient
+
+    def reset_grads(self):
         self.weights_gradient = np.zeros_like(self.weights)
+
+    def get_params(self):
+        return [self.weights]
+
+    def get_grads(self):
+        return [self.weights_gradient]
+
+    def get_param_count(self):
+        return np.prod(self.weights.shape)
 
     def get_output_shape(self):
         return (*self.sequence_len, self.embedding_size)
@@ -292,12 +334,10 @@ class PositionalEmbedding:
         self.weights = None
         self.weights_gradient = None
         self.input_shape = None
-        self.sequence_len = None
         self.embedding_size = None
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
-        self.sequence_len = self.input_shape[0]
         self.embedding_size = self.input_shape[1]
         self.weights = np.random.randn(self.max_sequence_len, self.embedding_size) / np.sqrt(self.embedding_size)
         self.weights_gradient = np.zeros_like(self.weights)
@@ -313,13 +353,25 @@ class PositionalEmbedding:
         return a_output, None
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
-        self.weights_gradient[:self.sequence_len] += np.sum(dc_da, axis=0)
+        sequence_len = prev_layer_activations.shape[1]
+        self.weights_gradient[:sequence_len] += np.sum(dc_da, axis=0)
 
         return dc_da
 
     def update_weights_and_biases(self, learning_rate, batch_size):
         self.weights -= learning_rate * self.weights_gradient
+
+    def reset_grads(self):
         self.weights_gradient = np.zeros_like(self.weights)
+
+    def get_params(self):
+        return [self.weights]
+
+    def get_grads(self):
+        return [self.weights_gradient]
+
+    def get_param_count(self):
+        return np.prod(self.weights.shape)
 
     def get_output_shape(self):
         return self.input_shape
@@ -372,8 +424,18 @@ class LayerNorm:
         self.scale -= learning_rate * self.scale_gradient
         self.shift -= learning_rate * self.shift_gradient
 
+    def reset_grads(self):
         self.scale_gradient = np.zeros_like(self.scale)
         self.shift_gradient = np.zeros_like(self.shift)
+
+    def get_params(self):
+        return [self.scale, self.shift]
+
+    def get_grads(self):
+        return [self.scale_gradient, self.shift_gradient]
+
+    def get_param_count(self):
+        return np.prod(self.scale.shape) + np.prod(self.shift.shape)
 
     def get_output_shape(self):
         return self.input_shape
@@ -495,17 +557,27 @@ class Attention:
         self.w_o -= learning_rate * self.w_o_gradient
         self.b_o -= learning_rate * self.b_o_gradient
 
+    def reset_grads(self):
         self.w_q_gradient = np.zeros_like(self.w_q)
         self.w_k_gradient = np.zeros_like(self.w_k)
         self.w_v_gradient = np.zeros_like(self.w_v)
         self.w_o_gradient = np.zeros_like(self.w_o)
         self.b_o_gradient = np.zeros_like(self.b_o)
 
+    def get_params(self):
+        return [self.w_q, self.w_k, self.w_v, self.w_o, self.b_o]
+
+    def get_grads(self):
+        return [self.w_q_gradient, self.w_k_gradient, self.w_v_gradient, self.w_o_gradient, self.b_o_gradient]
+
+    def get_param_count(self):
+        return np.prod(self.w_q.shape) + np.prod(self.w_k.shape) + np.prod(self.w_v.shape) + np.prod(self.w_o.shape) + np.prod(self.b_o.shape)
+
     def get_output_shape(self):
         return self.input_shape
 
 class MultilayerPerceptron:
-    def __init__(self, d_ff, activation='relu'):
+    def __init__(self, d_ff, activation='gelu'):
         self.d_ff = d_ff
         self.activation_name = activation
         self.activation = activations.Activation(activation)
@@ -573,13 +645,24 @@ class MultilayerPerceptron:
     def update_weights_and_biases(self, learning_rate, batch_size):
         self.up_weights -= learning_rate * self.up_weights_gradient
         self.up_biases -= learning_rate * self.up_biases_gradient
-        self.up_weights_gradient = np.zeros_like(self.up_weights)
-        self.up_biases_gradient = np.zeros_like(self.up_biases)
 
         self.down_weights -= learning_rate * self.down_weights_gradient
         self.down_biases -= learning_rate * self.down_biases_gradient
+
+    def reset_grads(self):
+        self.up_weights_gradient = np.zeros_like(self.up_weights)
+        self.up_biases_gradient = np.zeros_like(self.up_biases)
         self.down_weights_gradient = np.zeros_like(self.down_weights)
         self.down_biases_gradient = np.zeros_like(self.down_biases)
+
+    def get_params(self):
+        return [self.up_weights, self.up_biases, self.down_weights, self.down_biases]
+
+    def get_grads(self):
+        return [self.up_weights_gradient, self.up_biases_gradient, self.down_weights_gradient, self.down_biases_gradient]
+
+    def get_param_count(self):
+        return np.prod(self.up_weights.shape) + np.prod(self.up_biases.shape) + np.prod(self.down_weights.shape) + np.prod(self.down_biases.shape)
 
     def get_output_shape(self):
         return self.input_shape
@@ -620,6 +703,28 @@ class ResidualBlock:
         for layer in self.layers:
             layer.update_weights_and_biases(learning_rate, batch_size)
 
+    def reset_grads(self):
+        for layer in self.layers:
+            layer.reset_grads()
+
+    def get_params(self):
+        params = []
+        for layer in self.layers:
+            params.extend(layer.get_params())
+        return params
+
+    def get_grads(self):
+        grads = []
+        for layer in self.layers:
+            grads.extend(layer.get_grads())
+        return grads
+
+    def get_param_count(self):
+        param_count = 0
+        for layer in self.layers:
+            param_count += layer.get_param_count()
+        return param_count
+
     def get_output_shape(self):
         return self.output_shape
 
@@ -635,12 +740,12 @@ class TimeDistributedDense:
         self.biases = None
         self.biases_gradient = None
 
-        self.input_shape = None
+        self.output_shape = None
         self.d_i = None
 
     def init_weights(self, last_layer_shape):
-        self.input_shape = last_layer_shape
-        self.d_i = self.input_shape[1]
+        self.output_shape = (last_layer_shape[0], self.units)
+        self.d_i = last_layer_shape[1]
 
         self.weights = np.random.randn(self.units, self.d_i) * np.sqrt(2 / self.d_i)
         self.weights_gradient = np.zeros_like(self.weights)
@@ -674,8 +779,19 @@ class TimeDistributedDense:
     def update_weights_and_biases(self, learning_rate, batch_size):
         self.weights -= learning_rate * self.weights_gradient
         self.biases -= learning_rate * self.biases_gradient
+
+    def reset_grads(self):
         self.weights_gradient = np.zeros_like(self.weights)
         self.biases_gradient = np.zeros_like(self.biases)
 
+    def get_params(self):
+        return [self.weights, self.biases]
+
+    def get_grads(self):
+        return [self.weights_gradient, self.biases_gradient]
+
+    def get_param_count(self):
+        return np.prod(self.weights.shape) + np.prod(self.biases.shape)
+
     def get_output_shape(self):
-        return self.input_shape
+        return self.output_shape

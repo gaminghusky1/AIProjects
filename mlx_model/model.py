@@ -1,6 +1,13 @@
-import numpy as np
-import loss_functions
+import mlx.core as mx
+from mlx_model import loss_functions
+from mlx_model import optimizers
 import pickle
+
+def to_ohe(y_batch, vocab_size):
+    b, t = y_batch.shape
+    ohe = mx.zeros((b, t, vocab_size), dtype=mx.float32)
+    ohe[mx.arange(b)[:, mx.newaxis], mx.arange(t), y_batch] = 1.0
+    return ohe
 
 class Model:
     def __init__(self, input_shape, *layers):
@@ -8,11 +15,13 @@ class Model:
         self.layers = layers
         self.loss_func_name = None
         self.loss_func = None
+        self.optimizer = None
         self.compiled = False
 
-    def compile(self, loss='mse'):
+    def compile(self, loss='mse', optimizer=None):
         self.loss_func_name = loss
         self.loss_func = loss_functions.LossFunction(loss)
+        self.optimizer = optimizers.optimizer_dict[optimizer]() if optimizer is not None else None
         self.compiled = True
 
     def forward_propagate(self, inputs, batch_size):
@@ -30,7 +39,7 @@ class Model:
         for i in reversed(range(len(self.layers))):
             dc_da = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da, batch_size)
 
-    def fit(self, x, y, epochs, learning_rate=0.01, batch_size=1, shuffle=True, verbose=1):
+    def fit(self, x, y, epochs, learning_rate=0.01, batch_size=1, shuffle=True, verbose=1, y_ohe=True, save_after_each_epoch=False, path="model"):
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
@@ -44,8 +53,8 @@ class Model:
         data_len = len(x)
         for i in range(epochs):
             if shuffle:
-                indices = np.arange(data_len)
-                np.random.shuffle(indices)
+                indices = mx.arange(data_len)
+                indices = mx.random.permutation(indices)
                 x, y = x[indices], y[indices]
 
             loss_sum = 0
@@ -57,21 +66,40 @@ class Model:
                 x_batch = x[idx:idx + curr_batch_size]
                 y_batch = y[idx:idx + curr_batch_size]
 
+                if not y_ohe:
+                    y_batch = to_ohe(y_batch, last_layer_shape[-1])
+
                 a_outputs, z_outputs = self.forward_propagate(x_batch, curr_batch_size)
-                loss_sum += np.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size
-                num_correct += np.mean(np.argmax(a_outputs[-1], axis=-1) == np.argmax(y_batch, axis=-1)) * curr_batch_size
+                batch_loss_sum = mx.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size
+                batch_num_correct = mx.mean(mx.argmax(a_outputs[-1], axis=-1) == mx.argmax(y_batch, axis=-1)) * curr_batch_size
 
                 self.backward_propagate(a_outputs, z_outputs, y_batch, curr_batch_size)
 
+                if self.optimizer is not None:
+                    param_refs = []
+                    grads = []
+                    for layer in self.layers:
+                        param_refs.extend(layer.get_param_refs())
+                        grads.extend(layer.get_grads())
+                    self.optimizer.step(param_refs, grads)
+                else:
+                    for layer in self.layers:
+                        layer.update_weights_and_biases(learning_rate, curr_batch_size)
+
                 for layer in self.layers:
-                    layer.update_weights_and_biases(learning_rate, curr_batch_size)
+                    layer.reset_grads()
 
                 idx += curr_batch_size
+                mx.eval(batch_loss_sum, batch_num_correct)
+                loss_sum += batch_loss_sum.item()
+                num_correct += batch_num_correct.item()
                 if verbose > 1:
-                    print(f"Epoch: {i + 1}; Batch: {idx // batch_size + (idx % batch_size != 0)}; Loss: {loss_sum / idx:.5f}; Accuracy: {num_correct / idx:.5f}")
+                    print(f"Epoch: {i + 1}/{epochs}; Batch: {idx // batch_size + (idx % batch_size != 0)}/{(data_len + batch_size - 1) // batch_size}; Loss: {loss_sum / idx:.5f}; Accuracy: {num_correct / idx:.5f}")
 
             if verbose > 0:
                 print(f"Epoch {i+1}/{epochs} finished with loss of {loss_sum / data_len:.5f} and accuracy of {num_correct / data_len:.5f}")
+            if save_after_each_epoch:
+                self.save_as(path + f"_epoch_{i+1}")
         print("Training completed.")
 
     def predict(self, x):
@@ -80,12 +108,14 @@ class Model:
             y_hat = layer.get_output(y_hat)
         return y_hat
 
-    def test(self, x, y):
+    def test(self, x, y, y_ohe=True):
         data_len = len(x)
         y_hat = x
         for layer in self.layers:
             y_hat = layer.get_output(y_hat, data_len)
-        num_correct = np.sum(np.argmax(y_hat, axis=1) == np.argmax(y, axis=1))
+        if not y_ohe:
+            y = to_ohe(y, y_hat.shape[-1])
+        num_correct = mx.mean(mx.argmax(y_hat, axis=-1) == mx.argmax(y, axis=-1)).item() * data_len
         return num_correct / data_len
 
     def save_as(self, path):

@@ -19,6 +19,25 @@ def relu(x):
 def relu_derivative(x):
     return (x > 0).astype(x.dtype)
 
+def gelu(x):
+    x = np.asarray(x)
+    a = 0.044715
+    k = np.sqrt(2.0 / np.pi)
+    u = k * (x + a * x**3)
+    return 0.5 * x * (1.0 + np.tanh(u))
+
+def gelu_derivative(x):
+    x = np.asarray(x)
+    a = 0.044715
+    k = np.sqrt(2.0 / np.pi)
+    u = k * (x + a * x**3)
+
+    t = np.tanh(u)
+    sech2 = 1.0 - t * t
+    du_dx = k * (1.0 + 3.0 * a * x * x)
+
+    return 0.5 * (1.0 + t) + 0.5 * x * sech2 * du_dx
+
 def tanh(x):
     return np.tanh(x)
 
@@ -60,6 +79,7 @@ activation_dict = {
     'linear': [linear, linear_derivative, True],
     'sigmoid': [sigmoid, sigmoid_derivative, True],
     'relu': [relu, relu_derivative, True],
+    'gelu': [gelu, gelu_derivative, True],
     'tanh': [tanh, tanh_derivative, True],
     'softmax': [softmax, softmax_derivative, False],
     'time_distributed_softmax': [softmax, time_distributed_softmax_derivative, False],
