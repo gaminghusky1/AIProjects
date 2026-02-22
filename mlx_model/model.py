@@ -51,7 +51,8 @@ class Model:
             raise RuntimeError("Model must be compiled before fitting.")
 
         self.optimizer.learning_rate = learning_rate
-        print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
+        if verbose >= 0:
+            print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
 
         data_len = len(x)
         for i in range(epochs):
@@ -105,7 +106,8 @@ class Model:
                 print(f"Epoch {i+1}/{epochs} finished with loss of {loss_sum / data_len:.5f} and accuracy of {num_correct / data_len:.5f}")
             if save_after_each_epoch:
                 self.save_as(path + f"_epoch_{i+1}")
-        print("Training completed.")
+        if verbose >= 0:
+            print("Training completed.")
 
     def predict(self, x):
         y_hat = x
