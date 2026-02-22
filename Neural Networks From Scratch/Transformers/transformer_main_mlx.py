@@ -89,13 +89,6 @@ def load_data(
 def main():
     block_size = 32
     x_train, y_train, vocab_size = load_data("TransformerData/conversations.txt", block_size=block_size)
-    # sp = spm.SentencePieceProcessor()
-    # sp.Load("TransformerData/spm_openwebtext_wikitext.model")
-    # vocab_size = sp.GetPieceSize()
-    # x_train = np.load(f"TransformerData/x_train_T{block_size}.npy")
-    # y_train = np.load(f"TransformerData/y_train_T{block_size}.npy")
-    # x_test = np.load(f"TransformerData/x_val_T{block_size}.npy")
-    # y_test = np.load(f"TransformerData/y_val_T{block_size}.npy")
     d_model = 512
     d_ff = 4 * d_model
     head_count = 8
@@ -141,7 +134,7 @@ def main():
 
     # print("Accuracy on test dataset:", transformer_model.test(x_test, y_test, y_ohe=False))
 
-    transformer_model.save_as("Models/transformer_model_20_epochs_mlx")
+    # transformer_model.save_as("Models/transformer_model_20_epochs_mlx")
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,7 @@
 import mlx.core as mx
 from mlx_model import loss_functions
 from mlx_model import optimizers
+from pathlib import Path
 import pickle
 
 def to_ohe(y_batch, vocab_size):
@@ -17,11 +18,17 @@ class Model:
         self.loss_func = None
         self.optimizer = None
         self.compiled = False
+        self.curr_loss = 0
+        self.curr_accuracy = 0
 
     def compile(self, loss='mse', optimizer=None):
         self.loss_func_name = loss
         self.loss_func = loss_functions.LossFunction(loss)
         self.optimizer = optimizers.optimizer_dict[optimizer]() if optimizer is not None else None
+        last_layer_shape = self.input_shape
+        for layer in self.layers:
+            layer.init_weights(last_layer_shape)
+            last_layer_shape = layer.get_output_shape()
         self.compiled = True
 
     def forward_propagate(self, inputs, batch_size):
@@ -43,12 +50,8 @@ class Model:
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
+        self.optimizer.learning_rate = learning_rate
         print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
-
-        last_layer_shape = self.input_shape
-        for layer in self.layers:
-            layer.init_weights(last_layer_shape)
-            last_layer_shape = layer.get_output_shape()
 
         data_len = len(x)
         for i in range(epochs):
@@ -67,7 +70,7 @@ class Model:
                 y_batch = y[idx:idx + curr_batch_size]
 
                 if not y_ohe:
-                    y_batch = to_ohe(y_batch, last_layer_shape[-1])
+                    y_batch = to_ohe(y_batch, self.layers[-1].get_output_shape()[-1])
 
                 a_outputs, z_outputs = self.forward_propagate(x_batch, curr_batch_size)
                 batch_loss_sum = mx.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size
@@ -96,6 +99,8 @@ class Model:
                 if verbose > 1:
                     print(f"Epoch: {i + 1}/{epochs}; Batch: {idx // batch_size + (idx % batch_size != 0)}/{(data_len + batch_size - 1) // batch_size}; Loss: {loss_sum / idx:.5f}; Accuracy: {num_correct / idx:.5f}")
 
+            self.curr_loss = loss_sum / data_len
+            self.curr_accuracy = num_correct / data_len
             if verbose > 0:
                 print(f"Epoch {i+1}/{epochs} finished with loss of {loss_sum / data_len:.5f} and accuracy of {num_correct / data_len:.5f}")
             if save_after_each_epoch:
@@ -118,9 +123,25 @@ class Model:
         num_correct = mx.mean(mx.argmax(y_hat, axis=-1) == mx.argmax(y, axis=-1)).item() * data_len
         return num_correct / data_len
 
+    def get_param_count(self):
+        if not self.compiled:
+            raise RuntimeError("Model must be compiled to know parameter count.")
+        param_count = 0
+        for layer in self.layers:
+            param_count += layer.get_param_count()
+        return param_count
+
+    def get_current_loss(self):
+        return self.curr_loss
+
+    def get_current_accuracy(self):
+        return self.curr_accuracy
+
     def save_as(self, path):
         print(f"Saving model to {path}...")
-        with open(path + ".pkl", "wb") as file:
+        full_path = Path(path).with_suffix(".pkl")
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(full_path, "wb") as file:
             pickle.dump(self, file)
         print(f"Model saved to {path}.")
 

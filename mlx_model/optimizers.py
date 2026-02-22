@@ -28,6 +28,9 @@ class Adam:
             update = self.learning_rate * m_hat / (mx.sqrt(v_hat) + self.epsilon)
             params[i] = params[i] - update
 
+            # print("delta:", mx.mean(mx.abs(params[i] - getattr(*param_refs[i]))))
+            # print("grad:", mx.mean(mx.abs(grads[i])))
+
         for i in range(len(params)):
             setattr(param_refs[i][0], param_refs[i][1], params[i])
 
