@@ -39,17 +39,17 @@ def main():
     sp = spm.SentencePieceProcessor()
     sp.Load("tinychat_tokenizer/spm.model")
 
-    transformer_model = model.Model.load_from("TinychatModels/tinychat_model_batch_7500")
+    transformer_model = model.Model.load_from("TinychatModels/tinychat_model_batch_15000")
 
     accumulated_ids = []
     max_context = 128
 
     while True:
-        user_input = "[INST] " + input("> ").strip() + " [/INST]"
+        user_input = "[INST] " + input("> ").strip() + " [/INST] "
         user_input_ids = sp.EncodeAsIds(user_input)
         accumulated_ids.extend(user_input_ids)
 
-        assistant_output, accumulated_ids = generate(transformer_model, sp, accumulated_ids, max_new_tokens=200, temperature=1.1)
+        assistant_output, accumulated_ids = generate(transformer_model, sp, accumulated_ids, max_new_tokens=200, temperature=0.9)
         print(assistant_output)
 
         if len(accumulated_ids) > max_context:

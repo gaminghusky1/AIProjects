@@ -133,13 +133,17 @@ def main():
     # tinychat_model.compile(loss='softmax_crossentropy', optimizer='adam')
 
     start_batch = 7500
-    end_batch = 10000
+    end_batch = 15000
     tinychat_model = model.Model.load_from(f"TinychatModels/tinychat_model_batch_{start_batch}")
 
     print("Param count:", tinychat_model.get_param_count())
 
-    # losses = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
-    losses = pd.read_csv("TinychatModels/tinychat_losses.csv", index_col=0)
+    # metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
+    metrics = pd.read_csv("TinychatModels/tinychat_metrics.csv", index_col=0)
+
+    # Learning rate schedule
+    lr_start = 3e-4
+    lr_end = 3e-5
 
     save_after_batches = 500
     batches_since_last_save = 0
@@ -148,7 +152,10 @@ def main():
     for i in range(start_batch, end_batch):
         # print(f"Current Batch: {i+1}")
         x_train, y_train = batcher.sample_batch(batch_size=32, seq_len=seq_len)
-        tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=3e-4, batch_size=32, verbose=-1, y_ohe=False)
+        progress = (i - start_batch) / (end_batch - start_batch - 1)
+        progress = min(1.0, max(0.0, progress))
+        lr_curr = lr_start * (lr_end / lr_start) ** progress
+        tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=lr_curr, batch_size=32, verbose=-1, y_ohe=False)
         curr_accuracy = tinychat_model.get_current_accuracy()
         raw_loss = tinychat_model.get_current_loss()
         if ema_loss is None:
@@ -156,15 +163,15 @@ def main():
         else:
             ema_loss = ema_beta * ema_loss + (1 - ema_beta) * raw_loss
         print(f"Batch {i+1}/{end_batch} finished; Loss: {raw_loss:.5f}, EMA Loss: {ema_loss:.5f}, Accuracy: {curr_accuracy:.5f}")
-        losses.loc[i+1] = {"loss": raw_loss, "ema_loss": ema_loss, "accuracy": curr_accuracy}
+        metrics.loc[i+1] = {"loss": raw_loss, "ema_loss": ema_loss, "accuracy": curr_accuracy}
         batches_since_last_save += 1
         if batches_since_last_save >= save_after_batches:
             tinychat_model.save_as(f"TinychatModels/tinychat_model_batch_{i+1}")
-            losses.to_csv("TinychatModels/tinychat_losses.csv")
+            metrics.to_csv("TinychatModels/tinychat_metrics.csv")
             batches_since_last_save = 0
 
-    tinychat_model.save_as("TinychatModels/tinychat_model")
-    losses.to_csv("TinychatModels/tinychat_losses.csv")
+    # tinychat_model.save_as("TinychatModels/tinychat_model")
+    metrics.to_csv("TinychatModels/tinychat_metrics.csv")
 
 if __name__ == "__main__":
     main()
