@@ -6,8 +6,7 @@ import pandas as pd
 from datasets import load_dataset
 from sentencepiece import SentencePieceProcessor
 
-from mlx_model import *
-import mlx.core as mx
+from base_model import *
 
 class TokenBatcher:
     def __init__(self, tokens_npy_path: str):
@@ -31,7 +30,7 @@ class TokenBatcher:
             x[i] = chunk[:-1]
             y[i] = chunk[1:]
 
-        return mx.array(x, dtype=mx.int32), mx.array(y, dtype=mx.int32)
+        return x, y
 
 DATASET_NAME = "starhopp3r/TinyChat"
 SPECIAL_TOKENS = ["[INST]", "[/INST]"]
@@ -122,7 +121,7 @@ def main():
     batcher = TokenBatcher(tokens_npy_path="tinychat_tokens.npy")
 
     vocab_size = sp.GetPieceSize()
-    seq_len = 256
+    seq_len = 512
     d_model = 384
     d_ff = 4 * d_model
     num_heads = 6
@@ -164,9 +163,9 @@ def main():
     ema_beta = 0.99
     for i in range(start_batch, end_batch):
         # print(f"Current Batch: {i+1}")
-        x_train, y_train = batcher.sample_batch(batch_size=1, seq_len=seq_len)
+        x_train, y_train = batcher.sample_batch(batch_size=16, seq_len=seq_len)
         lr_curr = lr_schedule(i, final_end_batch, peak_lr)
-        tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=lr_curr, batch_size=1, verbose=-1, y_ohe=False)
+        tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=lr_curr, batch_size=16, verbose=-1, y_ohe=False)
         curr_accuracy = tinychat_model.get_current_accuracy()
         raw_loss = tinychat_model.get_current_loss()
         if ema_loss is None:

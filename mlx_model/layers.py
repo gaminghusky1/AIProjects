@@ -80,7 +80,7 @@ class Dense:
         if self.activation.elementwise:
             dc_dz = dc_da * self.activation.derivative(curr_layer_z)
         else:
-            dc_dz = mx.einsum('bo,boo->bo', dc_da, self.activation.derivative(curr_layer_z))
+            dc_dz = mx.einsum('bi,bij->bj', dc_da, self.activation.derivative(curr_layer_z))
         # Cost of current layer weights
         # dc_dw; dz_dw = a_L-1
         self.weights_gradient = self.weights_gradient + mx.matmul(prev_layer_activations.T, dc_dz)
@@ -204,7 +204,7 @@ class Convolution:
         if self.activation.elementwise:
             dc_dz = dc_da * da_dz
         else:
-            dc_dz = mx.einsum('bfo,bfoo->bfo', dc_da, da_dz)
+            dc_dz = mx.einsum('bfi,bfij->bfj', dc_da, da_dz)
 
         windows = self.get_windows(prev_layer_activations, batch_size)
         # dz_dw = np.zeros((*self.stacked_output_shape, *self.kernel_stack_shape))
@@ -357,7 +357,7 @@ class TokenEmbedding:
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
         dc_da = mx.reshape(dc_da, (-1, self.embedding_size))
 
-        self.weights_gradient.at[mx.flatten(prev_layer_activations)].add(dc_da)
+        self.weights_gradient = self.weights_gradient.at[mx.flatten(prev_layer_activations)].add(dc_da)
 
         return None
 
@@ -445,11 +445,9 @@ class LayerNorm:
         self.shift = None
         self.shift_gradient = None
         self.input_shape = None
-        self.sequence_len = None
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
-        self.sequence_len = self.input_shape[0]
         self.scale = mx.ones(self.input_shape[1])
         self.shift = mx.zeros(self.input_shape[1])
 
@@ -567,11 +565,17 @@ class Attention:
         k = mx.reshape(k, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
         v = mx.reshape(v, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
 
-        raw_scores = mx.einsum('bhtk,bhsk->bhts', q, k) / math.sqrt(self.d_k // self.heads)
+        d_head = q.shape[-1]
+        scale = 1.0 / math.sqrt(d_head)
+        raw_scores = mx.einsum('bhtk,bhsk->bhts', q, k) * scale
         if self.mask is not None:
-            raw_scores = mx.where(self.mask(sequence_len), -1e9, raw_scores)
+            mask = self.mask(sequence_len)
+            raw_scores = mx.where(mask, raw_scores, -1e9)
 
         attention_scores = activations.softmax(raw_scores)
+
+        if self.mask is not None:
+            attention_scores = attention_scores * mask
 
         z_output = mx.einsum('bhts,bhsv->bhtv', attention_scores, v)
         z_output = z_output.transpose((0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
@@ -600,12 +604,18 @@ class Attention:
         dc_dattention_scores = mx.einsum('bhtv,bhsv->bhts', dc_dz, v)
         dattention_scores_draw_scores = activations.attention_softmax_derivative(raw_scores)
 
-        dc_draw_scores = mx.einsum('bhts,bhtss->bhts', dc_dattention_scores, dattention_scores_draw_scores)
-        if self.mask is not None:
-            dc_draw_scores = mx.where(self.mask(sequence_len), 0, dc_draw_scores)
+        # j is same as s, but it needs to be a different letter for einsum to do matmul correctly.
+        dc_draw_scores = mx.einsum('bhts,bhtsj->bhtj', dc_dattention_scores, dattention_scores_draw_scores)
 
-        dc_dq = mx.einsum('bhts,bhsk->bhtk', dc_draw_scores, k) / math.sqrt(self.d_k // self.heads)
-        dc_dk = mx.einsum('bhts,bhtk->bhsk', dc_draw_scores, q) / math.sqrt(self.d_k // self.heads)
+        # Apparently because in forward pass the mask is zero the dc_draw_scores will essentially be zero in the correct positions.
+        # If this is not correct however, the mask() will need to be fixed to work here for where().
+        if self.mask is not None:
+            # dc_draw_scores = mx.where(self.mask(sequence_len), 0, dc_draw_scores)
+            dc_draw_scores = dc_draw_scores * self.mask(sequence_len)
+        d_head = q.shape[-1]
+        scale = 1.0 / math.sqrt(d_head)
+        dc_dq = mx.einsum('bhts,bhsk->bhtk', dc_draw_scores, k) * scale
+        dc_dk = mx.einsum('bhts,bhtk->bhsk', dc_draw_scores, q) * scale
 
         dc_dq = mx.transpose(dc_dq, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
         dc_dk = mx.transpose(dc_dk, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
@@ -843,7 +853,7 @@ class TimeDistributedDense:
         if self.activation.elementwise:
             dc_dz = dc_da * self.activation.derivative(curr_layer_z)
         else:
-            dc_dz = mx.einsum('bso,bsoo->bso', dc_da, self.activation.derivative(curr_layer_z))
+            dc_dz = mx.einsum('bsi,bsij->bsj', dc_da, self.activation.derivative(curr_layer_z))
 
         self.weights_gradient = self.weights_gradient + mx.einsum('bso,bsi->oi', dc_dz, prev_layer_activations)
         self.biases_gradient = self.biases_gradient + mx.sum(dc_dz, axis=(0, 1))

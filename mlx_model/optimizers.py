@@ -30,6 +30,10 @@ class Adam:
 
             # print("delta:", mx.mean(mx.abs(params[i] - getattr(*param_refs[i]))))
             # print("grad:", mx.mean(mx.abs(grads[i])))
+            # print("Params:", sum(p.size for p in params))
+            # print("Gradients:", sum(g.size for g in grads))
+            # print("M:", sum(m.size for m in self.m))
+            # print("V:", sum(v.size for v in self.v))
 
         for i in range(len(params)):
             setattr(param_refs[i][0], param_refs[i][1], params[i])

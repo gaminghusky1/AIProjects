@@ -50,7 +50,8 @@ class Model:
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
-        self.optimizer.learning_rate = learning_rate
+        if self.optimizer is not None:
+            self.optimizer.learning_rate = learning_rate
         if verbose >= 0:
             print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
 
@@ -67,8 +68,8 @@ class Model:
             idx = 0
             while idx < data_len:
                 curr_batch_size = min(batch_size, data_len - idx)
-                x_batch = x[idx:idx + curr_batch_size]
-                y_batch = y[idx:idx + curr_batch_size]
+                x_batch = mx.array(x[idx:idx + curr_batch_size])
+                y_batch = mx.array(y[idx:idx + curr_batch_size])
 
                 if not y_ohe:
                     y_batch = to_ohe(y_batch, self.layers[-1].get_output_shape()[-1])

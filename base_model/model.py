@@ -25,6 +25,10 @@ class Model:
         self.loss_func_name = loss
         self.loss_func = loss_functions.LossFunction(loss)
         self.optimizer = optimizers.optimizer_dict[optimizer]() if optimizer is not None else None
+        last_layer_shape = self.input_shape
+        for layer in self.layers:
+            layer.init_weights(last_layer_shape)
+            last_layer_shape = layer.get_output_shape()
         self.compiled = True
 
     def forward_propagate(self, inputs, batch_size):
@@ -46,14 +50,10 @@ class Model:
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
-        self.optimizer.learning_rate = learning_rate
+        if self.optimizer is not None:
+            self.optimizer.learning_rate = learning_rate
         if verbose >= 0:
             print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
-
-        last_layer_shape = self.input_shape
-        for layer in self.layers:
-            layer.init_weights(last_layer_shape)
-            last_layer_shape = layer.get_output_shape()
 
         data_len = len(x)
         for i in range(epochs):
@@ -68,11 +68,11 @@ class Model:
             idx = 0
             while idx < data_len:
                 curr_batch_size = min(batch_size, data_len - idx)
-                x_batch = x[idx:idx + curr_batch_size]
-                y_batch = y[idx:idx + curr_batch_size]
+                x_batch = np.array(x[idx:idx + curr_batch_size])
+                y_batch = np.array(y[idx:idx + curr_batch_size])
 
                 if not y_ohe:
-                    y_batch = to_ohe(y_batch, last_layer_shape[-1])
+                    y_batch = to_ohe(y_batch, self.layers[-1].get_output_shape()[-1])
 
                 a_outputs, z_outputs = self.forward_propagate(x_batch, curr_batch_size)
                 loss_sum += np.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size

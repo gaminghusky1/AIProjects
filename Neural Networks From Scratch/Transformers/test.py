@@ -1,5 +1,7 @@
-import numpy as np
+import mlx.core as mx
 
-x_train = np.load("TransformerData/x_train_T64.npy")
+a = mx.array([1, 1], dtype=mx.float32)
 
-print(x_train.shape)
+b = mx.array([[1, 2],
+              [3, 4]], dtype=mx.float32)
+print(mx.einsum("i,ij->j", a, b))

@@ -39,7 +39,7 @@ class Dense:
         if self.activation.elementwise:
             dc_dz = dc_da * self.activation.derivative(curr_layer_z)
         else:
-            dc_dz = np.einsum('bo,boo->bo', dc_da, self.activation.derivative(curr_layer_z))
+            dc_dz = np.einsum('bi,bij->bj', dc_da, self.activation.derivative(curr_layer_z))
         # Cost of current layer weights
         # dc_dw; dz_dw = a_L-1
         self.weights_gradient += np.dot(prev_layer_activations.T, dc_dz)
@@ -158,7 +158,7 @@ class Convolution:
         if self.activation.elementwise:
             dc_dz = dc_da * da_dz
         else:
-            dc_dz = np.einsum('bfo,bfoo->bfo', dc_da, da_dz)
+            dc_dz = np.einsum('bfi,bfij->bfj', dc_da, da_dz)
 
         windows = self.get_windows(prev_layer_activations, batch_size)
         # dz_dw = np.zeros((*self.stacked_output_shape, *self.kernel_stack_shape))
@@ -384,11 +384,9 @@ class LayerNorm:
         self.shift = None
         self.shift_gradient = None
         self.input_shape = None
-        self.sequence_len = None
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
-        self.sequence_len = self.input_shape[0]
         self.scale = np.ones(self.input_shape[1])
         self.shift = np.zeros(self.input_shape[1])
 
@@ -500,9 +498,17 @@ class Attention:
         k = np.reshape(k, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
         v = np.reshape(v, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
 
-        raw_scores = np.einsum('bhtk,bhsk->bhts', q, k) / np.sqrt(self.d_k // self.heads)
+        d_head = q.shape[-1]
+        scale = 1.0 / np.sqrt(d_head)
+        raw_scores = np.einsum('bhtk,bhsk->bhts', q, k) * scale
         if self.mask is not None:
-            raw_scores = np.where(self.mask(sequence_len), -1e9, raw_scores)
+            mask = self.mask(sequence_len)
+            raw_scores = np.where(mask, raw_scores, -1e9)
+
+        attention_scores = activations.softmax(raw_scores)
+
+        if self.mask is not None:
+            attention_scores *= mask
 
         attention_scores = activations.softmax(raw_scores)
 
@@ -533,12 +539,19 @@ class Attention:
         dc_dattention_scores = np.einsum('bhtv,bhsv->bhts', dc_dz, v)
         dattention_scores_draw_scores = activations.attention_softmax_derivative(raw_scores)
 
-        dc_draw_scores = np.einsum('bhts,bhtss->bhts', dc_dattention_scores, dattention_scores_draw_scores)
-        if self.mask is not None:
-            dc_draw_scores = np.where(self.mask(sequence_len), 0, dc_draw_scores)
+        # j is same as s, but it needs to be a different letter for einsum to do matmul correctly.
+        dc_draw_scores = np.einsum('bhts,bhtsj->bhtj', dc_dattention_scores, dattention_scores_draw_scores)
 
-        dc_dq = np.einsum('bhts,bhsk->bhtk', dc_draw_scores, k) / np.sqrt(self.d_k // self.heads)
-        dc_dk = np.einsum('bhts,bhtk->bhsk', dc_draw_scores, q) / np.sqrt(self.d_k // self.heads)
+        # Apparently because in forward pass the mask is zero the dc_draw_scores will essentially be zero in the correct positions.
+        # If this is not correct however, the mask() will need to be fixed to work here for where().
+        if self.mask is not None:
+            # dc_draw_scores = np.where(self.mask(sequence_len), 0, dc_draw_scores)
+            dc_draw_scores *= self.mask(sequence_len)
+
+        d_head = q.shape[-1]
+        scale = 1.0 / np.sqrt(d_head)
+        dc_dq = np.einsum('bhts,bhsk->bhtk', dc_draw_scores, k) * scale
+        dc_dk = np.einsum('bhts,bhtk->bhsk', dc_draw_scores, q) * scale
 
         dc_dq = np.transpose(dc_dq, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
         dc_dk = np.transpose(dc_dk, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
@@ -768,7 +781,7 @@ class TimeDistributedDense:
         if self.activation.elementwise:
             dc_dz = dc_da * self.activation.derivative(curr_layer_z)
         else:
-            dc_dz = np.einsum('bso,bsoo->bso', dc_da, self.activation.derivative(curr_layer_z))
+            dc_dz = np.einsum('bsi,bsij->bsj', dc_da, self.activation.derivative(curr_layer_z))
 
         self.weights_gradient += np.einsum('bso,bsi->oi', dc_dz, prev_layer_activations)
         self.biases_gradient += np.sum(dc_dz, axis=(0, 1))

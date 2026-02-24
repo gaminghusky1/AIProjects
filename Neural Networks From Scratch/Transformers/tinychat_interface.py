@@ -3,12 +3,16 @@ from mlx_model import *
 import mlx.core as mx
 import numpy as np
 
+inst_id = 4
+slash_inst_id = 5
+
 def sample_next_token(logits, temperature=1.0):
     if temperature <= 0:
         return int(mx.argmax(logits).item())
-
     logits = logits / temperature
     probs = mx.softmax(logits)
+
+    probs[slash_inst_id] = 0.0
 
     probs_np = np.array(probs)
     return int(np.random.choice(len(probs_np), p=probs_np))
@@ -27,7 +31,7 @@ def generate(transformer_model, sp, prompt_ids, max_new_tokens=200, temperature=
 
         ids = mx.concatenate([ids, mx.array([[next_id]], dtype=mx.int32)], axis=1)
 
-        if next_id == sp.eos_id():
+        if next_id == sp.eos_id() or next_id == inst_id:
             break
 
     assistant_output = sp.DecodeIds(generated_ids)
@@ -49,7 +53,7 @@ def main():
         user_input_ids = sp.EncodeAsIds(user_input)
         accumulated_ids.extend(user_input_ids)
 
-        assistant_output, accumulated_ids = generate(transformer_model, sp, accumulated_ids, max_new_tokens=200, temperature=0.9)
+        assistant_output, accumulated_ids = generate(transformer_model, sp, accumulated_ids, max_new_tokens=200, temperature=0.7)
         print(assistant_output)
 
         if len(accumulated_ids) > max_context:
