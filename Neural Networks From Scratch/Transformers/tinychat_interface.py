@@ -1,3 +1,5 @@
+import sys
+
 import sentencepiece as spm
 from mlx_model import *
 import mlx.core as mx
@@ -10,9 +12,8 @@ def sample_next_token(logits, temperature=1.0):
     if temperature <= 0:
         return int(mx.argmax(logits).item())
     logits = logits / temperature
+    logits[slash_inst_id] = -1e9
     probs = mx.softmax(logits)
-
-    probs[slash_inst_id] = 0.0
 
     probs_np = np.array(probs)
     return int(np.random.choice(len(probs_np), p=probs_np))
@@ -37,23 +38,23 @@ def generate(transformer_model, sp, prompt_ids, max_new_tokens=200, temperature=
     assistant_output = sp.DecodeIds(generated_ids)
     new_ids = ids[0].tolist()
 
-    return assistant_output.rstrip(), new_ids
+    return assistant_output.strip("N?[INST]").rstrip(), new_ids
 
 def main():
     sp = spm.SentencePieceProcessor()
     sp.Load("tinychat_tokenizer/spm.model")
 
-    transformer_model = model.Model.load_from("TinychatModels/tinychat_model_batch_15000")
+    transformer_model = model.Model.load_from("TinychatModels/better_tinychat_model_batch_2000")
 
     accumulated_ids = []
-    max_context = 128
+    max_context = 256
 
     while True:
         user_input = "[INST] " + input("> ").strip() + " [/INST] "
         user_input_ids = sp.EncodeAsIds(user_input)
         accumulated_ids.extend(user_input_ids)
 
-        assistant_output, accumulated_ids = generate(transformer_model, sp, accumulated_ids, max_new_tokens=200, temperature=0.7)
+        assistant_output, accumulated_ids = generate(transformer_model, sp, accumulated_ids, max_new_tokens=300, temperature=0.01)
         print(assistant_output)
 
         if len(accumulated_ids) > max_context:

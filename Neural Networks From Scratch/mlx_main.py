@@ -75,8 +75,8 @@ def main():
         # layers.Dense(512, activation="relu"),
         layers.Dense(256, activation="relu"),
         layers.Dense(128, activation="relu"),
-        layers.LayerNorm(),
-        layers.Dense(64, activation="relu"),
+        # layers.LayerNorm(),
+        # layers.Dense(64, activation="relu"),
         layers.Dense(10, activation="crossentropy_softmax")
     )
 
@@ -85,7 +85,7 @@ def main():
     # test_model.fit(x_train_cifar, y_train_cifar_oh, epochs=15, learning_rate=0.01, batch_size=32, verbose=2)
     # print("Accuracy on test dataset: " + str(test_model.test(x_test_cifar, y_test_cifar_oh)))
 
-    test_model.fit(x_train_mnist, y_train_mnist_oh, epochs=15, learning_rate=0.01, batch_size=1000, verbose=1)
+    test_model.fit(x_train_mnist, y_train_mnist_oh, epochs=30, learning_rate=0.01, batch_size=1000, verbose=1)
     print("Accuracy on test dataset: " + str(test_model.test(x_test_mnist, y_test_mnist_oh)))
 
     # test_model.save_as("Models/mnist_batched_model")

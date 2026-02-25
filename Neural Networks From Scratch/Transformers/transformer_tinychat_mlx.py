@@ -128,45 +128,45 @@ def main():
     num_heads = 6
     num_transformer_blocks = 10
 
-    tinychat_model = model.Model(
-        (seq_len,),
-        layers.TokenEmbedding(vocab_size, d_model),
-        layers.PositionalEmbedding(),
+    # tinychat_model = model.Model(
+    #     (seq_len,),
+    #     layers.TokenEmbedding(vocab_size, d_model),
+    #     layers.PositionalEmbedding(),
+    #
+    #     *[
+    #         layer
+    #         for _ in range(num_transformer_blocks)
+    #         for layer in create_transformer_block(d_model, d_ff, num_heads)
+    #     ],
+    #
+    #     layers.LayerNorm(),
+    #     layers.TimeDistributedDense(vocab_size, activation='crossentropy_softmax'),
+    # )
+    #
+    # tinychat_model.compile(loss='softmax_crossentropy', optimizer='adam')
 
-        *[
-            layer
-            for _ in range(num_transformer_blocks)
-            for layer in create_transformer_block(d_model, d_ff, num_heads)
-        ],
-
-        layers.LayerNorm(),
-        layers.TimeDistributedDense(vocab_size, activation='crossentropy_softmax'),
-    )
-
-    tinychat_model.compile(loss='softmax_crossentropy', optimizer='adam')
-
-    start_batch = 0
-    end_batch = 1000
+    start_batch = 2000
+    end_batch = 3000
     final_end_batch = 20000
-    # tinychat_model = model.Model.load_from(f"TinychatModels/better_tinychat_model_batch_{start_batch}")
+    tinychat_model = model.Model.load_from(f"TinychatModels/better_tinychat_model_batch_{start_batch}")
 
     print("Param count:", tinychat_model.get_param_count())
 
-    metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
-    # metrics = pd.read_csv("TinychatModels/better_tinychat_metrics.csv", index_col=0)
+    # metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
+    metrics = pd.read_csv("TinychatModels/better_tinychat_metrics.csv", index_col=0)
 
     # Learning rate schedule
-    peak_lr = 2e-3
+    peak_lr = 3e-4
 
     save_after_batches = 500
     batches_since_last_save = 0
-    ema_loss = None
+    ema_loss = metrics.loc[start_batch]["ema_loss"] if start_batch in metrics.index else None
     ema_beta = 0.99
     for i in range(start_batch, end_batch):
         # print(f"Current Batch: {i+1}")
-        x_train, y_train = batcher.sample_batch(batch_size=1, seq_len=seq_len)
-        lr_curr = lr_schedule(i, final_end_batch, peak_lr)
-        tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=lr_curr, batch_size=1, verbose=-1, y_ohe=False)
+        x_train, y_train = batcher.sample_batch(batch_size=16, seq_len=seq_len)
+        lr_curr = lr_schedule(step=i, total_steps=final_end_batch, peak_lr=peak_lr)
+        tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=lr_curr, batch_size=16, verbose=-1, y_ohe=False)
         curr_accuracy = tinychat_model.get_current_accuracy()
         raw_loss = tinychat_model.get_current_loss()
         if ema_loss is None:
