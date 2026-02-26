@@ -1,0 +1,9 @@
+{
+  "dataset": "starhopp3r/TinyChat",
+  "vocab_size": 8000,
+  "special_tokens": [
+    "[INST]",
+    "[/INST]"
+  ],
+  "model_sha256": "8451c40891ce2ab848bed98c53c676993e789664efde49d3398653128135cdaa"
+}

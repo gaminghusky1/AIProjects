@@ -1,4 +1,4 @@
-import os
+import os, json, hashlib
 import math
 import numpy as np
 import sentencepiece as spm
@@ -33,63 +33,109 @@ class TokenBatcher:
 
         return mx.array(x, dtype=mx.int32), mx.array(y, dtype=mx.int32)
 
+
 DATASET_NAME = "starhopp3r/TinyChat"
 SPECIAL_TOKENS = ["[INST]", "[/INST]"]
 
-def stream_tinychat_text(split="train"):
+
+def iter_tinychat_text(split="train"):
     ds = load_dataset(DATASET_NAME, split=split, streaming=True)
     for ex in ds:
         txt = ex.get("text", "")
         if txt:
-            yield txt
+            yield txt.replace("\n", " ")
 
-def train_sentencepiece(corpus_txt_path, model_prefix, vocab_size=8000):
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def train_spm_if_missing(tokenizer_dir="./tinychat_tokenizer",
+                         vocab_size=8000,
+                         text_limit_for_spm=200_000):
+    os.makedirs(tokenizer_dir, exist_ok=True)
+    model_path = os.path.join(tokenizer_dir, "spm.model")
+    meta_path = os.path.join(tokenizer_dir, "spm_meta.json")
+
+    if os.path.exists(model_path):
+        sp = spm.SentencePieceProcessor()
+        sp.Load(model_path)
+        return sp, model_path
+
+    corpus_path = os.path.join(tokenizer_dir, "corpus.txt")
+    with open(corpus_path, "w", encoding="utf-8") as f:
+        for i, txt in enumerate(iter_tinychat_text()):
+            f.write(txt + "\n")
+            if text_limit_for_spm and (i + 1) >= text_limit_for_spm:
+                break
+
     spm.SentencePieceTrainer.Train(
-        input=corpus_txt_path,
-        model_prefix=model_prefix,
+        input=corpus_path,
+        model_prefix=os.path.join(tokenizer_dir, "spm"),
         vocab_size=vocab_size,
         model_type="bpe",
         bos_id=1, eos_id=2, pad_id=0, unk_id=3,
         user_defined_symbols=SPECIAL_TOKENS,
+        shuffle_input_sentence=False,
     )
-    return model_prefix + ".model"
 
-def build_and_save_tokens(
-    out_tokens_path="tinychat_tokens.npy",
-    tokenizer_dir="./tinychat_tokenizer",
-    vocab_size=8000,
-    text_limit_for_spm=200_000,
-    add_eos_between_rows=True,
-):
-    os.makedirs(tokenizer_dir, exist_ok=True)
-    corpus_path = os.path.join(tokenizer_dir, "corpus.txt")
-    model_prefix = os.path.join(tokenizer_dir, "spm")
-
-    # 1) write a corpus for SPM (can be a subset)
-    with open(corpus_path, "w", encoding="utf-8") as f:
-        for i, txt in enumerate(stream_tinychat_text()):
-            f.write(txt.replace("\n", " ") + "\n")
-            if text_limit_for_spm is not None and (i + 1) >= text_limit_for_spm:
-                break
-
-    # 2) train tokenizer
-    model_path = train_sentencepiece(corpus_path, model_prefix, vocab_size=vocab_size)
     sp = spm.SentencePieceProcessor()
     sp.Load(model_path)
-    eos = sp.eos_id()
 
-    # 3) tokenize full dataset (streaming)
+    # Save metadata for safety
+    meta = {
+        "dataset": DATASET_NAME,
+        "vocab_size": vocab_size,
+        "special_tokens": SPECIAL_TOKENS,
+        "model_sha256": sha256_file(model_path),
+    }
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
+    return sp, model_path
+
+
+def build_ids_npy(
+        out_npy_path="tinychat_ids.npy",
+        tokenizer_dir="./tinychat_tokenizer",
+        vocab_size=8000,
+        text_limit_for_spm=200_000,
+        split="train",
+        add_eos_between_rows=True,
+):
+    sp, model_path = train_spm_if_missing(
+        tokenizer_dir=tokenizer_dir,
+        vocab_size=vocab_size,
+        text_limit_for_spm=text_limit_for_spm
+    )
+
+    eos = sp.eos_id()
     ids = []
-    for txt in stream_tinychat_text():
+
+    print("Tokenizing TinyChat...")
+
+    for txt in iter_tinychat_text(split=split):
         ids.extend(sp.EncodeAsIds(txt))
         if add_eos_between_rows and eos != -1:
             ids.append(eos)
 
-    ids = np.asarray(ids, dtype=np.int32)
+    ids_np = np.asarray(ids, dtype=np.int32)
 
-    # 4) save token stream fast
-    np.save(out_tokens_path, ids)  # uncompressed, fast
-    return out_tokens_path, model_path
+    np.save(out_npy_path, ids_np)
+
+    print("Saved:", out_npy_path)
+    print("Shape:", ids_np.shape)
+    print("Dtype:", ids_np.dtype)
+
+    # Quick sanity check
+    print("First 140 pieces:")
+    print([sp.IdToPiece(int(i)) for i in ids_np[:140]])
+
+    return out_npy_path, model_path
 
 def lr_schedule(step, total_steps, peak_lr, warmup_steps=500, min_lr_ratio=0.1):
     step = min(step, total_steps - 1)
@@ -116,10 +162,10 @@ def create_transformer_block(d_model, d_ff, num_heads):
     )
 
 def main():
-    # print(build_and_save_tokens())
+    model_name = "tinychat_model"
     sp = SentencePieceProcessor()
     sp.Load("tinychat_tokenizer/spm.model")
-    batcher = TokenBatcher(tokens_npy_path="tinychat_tokens.npy")
+    batcher = TokenBatcher(tokens_npy_path="tinychat_ids.npy")
 
     vocab_size = sp.GetPieceSize()
     seq_len = 256
@@ -145,15 +191,15 @@ def main():
     #
     # tinychat_model.compile(loss='softmax_crossentropy', optimizer='adam')
 
-    start_batch = 2000
-    end_batch = 3000
+    start_batch = 1000
+    end_batch = 2000
     final_end_batch = 20000
-    tinychat_model = model.Model.load_from(f"TinychatModels/better_tinychat_model_batch_{start_batch}")
+    tinychat_model = model.Model.load_from(f"TinychatModels/{model_name}_batch_{start_batch}")
 
     print("Param count:", tinychat_model.get_param_count())
 
     # metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
-    metrics = pd.read_csv("TinychatModels/better_tinychat_metrics.csv", index_col=0)
+    metrics = pd.read_csv(f"TinychatModels/{model_name}_metrics.csv", index_col=0)
 
     # Learning rate schedule
     peak_lr = 3e-4
@@ -177,12 +223,18 @@ def main():
         metrics.loc[i+1] = {"loss": raw_loss, "ema_loss": ema_loss, "accuracy": curr_accuracy}
         batches_since_last_save += 1
         if batches_since_last_save >= save_after_batches:
-            tinychat_model.save_as(f"TinychatModels/better_tinychat_model_batch_{i+1}")
-            metrics.to_csv("TinychatModels/better_tinychat_metrics.csv")
+            tinychat_model.save_as(f"TinychatModels/{model_name}_batch_{i+1}")
+            metrics.to_csv(f"TinychatModels/{model_name}_metrics.csv")
             batches_since_last_save = 0
 
-    # tinychat_model.save_as("TinychatModels/better_tinychat_model")
-    metrics.to_csv("TinychatModels/better_tinychat_metrics.csv")
+    # tinychat_model.save_as(f"TinychatModels/{model_name}_model")
+    metrics.to_csv(f"TinychatModels/{model_name}_metrics.csv")
 
 if __name__ == "__main__":
     main()
+    # id_path, spm_model_path = build_ids_npy()
+    # print(f"IDs saved to {id_path}, model to {spm_model_path}")
+    # sp = SentencePieceProcessor()
+    # sp.Load("tinychat_tokenizer/spm.model")
+    # batcher = TokenBatcher(tokens_npy_path="tinychat_ids.npy")
+    # print(sp.IdToPiece([int(i) for i in batcher.sample_batch(batch_size=1, seq_len=256)[0][0]]))

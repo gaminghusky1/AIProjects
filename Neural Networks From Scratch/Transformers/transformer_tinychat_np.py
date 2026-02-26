@@ -118,7 +118,7 @@ def main():
     # print(build_and_save_tokens())
     sp = SentencePieceProcessor()
     sp.Load("tinychat_tokenizer/spm.model")
-    batcher = TokenBatcher(tokens_npy_path="tinychat_tokens.npy")
+    batcher = TokenBatcher(tokens_npy_path="old_tinychat_tokenizer/tinychat_tokens.npy")
 
     vocab_size = sp.GetPieceSize()
     seq_len = 512
