@@ -461,8 +461,8 @@ class LayerNorm:
         return a_output
 
     def forward_pass(self, prev_layer_activations, batch_size):
-        numerator_term = prev_layer_activations - mx.mean(prev_layer_activations, axis=2, keepdims=True)
-        denominator_term = mx.sqrt(mx.var(prev_layer_activations, axis=2, keepdims=True) + self.epsilon)
+        numerator_term = prev_layer_activations - mx.mean(prev_layer_activations, axis=-1, keepdims=True)
+        denominator_term = mx.sqrt(mx.var(prev_layer_activations, axis=-1, keepdims=True) + self.epsilon)
 
         x_hat = numerator_term / denominator_term
 
@@ -473,12 +473,12 @@ class LayerNorm:
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
         x_hat, denominator_term = curr_layer_z
 
-        self.scale_gradient = self.scale_gradient + mx.sum(dc_da * x_hat, axis=(0, 1))
-        self.shift_gradient = mx.sum(dc_da, axis=(0, 1))
+        self.scale_gradient = self.scale_gradient + mx.sum(dc_da * x_hat, axis=tuple(range(dc_da.ndim - 1)))
+        self.shift_gradient = mx.sum(dc_da, axis=tuple(range(dc_da.ndim - 1)))
 
         g = dc_da * self.scale
 
-        dc_dprev_layer_activations = (g - g.mean(axis=2, keepdims=True) - x_hat * mx.mean(g * x_hat, axis=2, keepdims=True)) / denominator_term
+        dc_dprev_layer_activations = (g - g.mean(axis=-1, keepdims=True) - x_hat * mx.mean(g * x_hat, axis=-1, keepdims=True)) / denominator_term
         return dc_dprev_layer_activations
 
     def update_weights_and_biases(self, learning_rate, batch_size):

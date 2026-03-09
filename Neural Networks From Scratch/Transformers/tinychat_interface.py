@@ -17,10 +17,11 @@ def sample_next_token(probs, temperature=1.0):
     probs_np = np.array(probs)
     return int(np.random.choice(len(probs_np), p=probs_np))
 
-def generate(transformer_model, prompt_ids, max_new_tokens=200, temperature=1.0):
+def generate_stream(transformer_model, prompt_ids, max_new_tokens=200, temperature=1.0):
     ids = mx.array([prompt_ids], dtype=mx.int32)
 
     generated_ids = []
+    running_text = ""
 
     for _ in range(max_new_tokens):
         probs = transformer_model.predict(ids)
@@ -30,44 +31,69 @@ def generate(transformer_model, prompt_ids, max_new_tokens=200, temperature=1.0)
         if next_id == inst_id:
             break
 
-        generated_ids.append(next_id)
-
         ids = mx.concatenate([ids, mx.array([[next_id]], dtype=mx.int32)], axis=1)
+
+        generated_ids.append(next_id)
+        full_text = sp.DecodeIds(generated_ids)
+        new_text = full_text[len(running_text):]
+        running_text = full_text
+
+        yield {
+            "type": "token",
+            "id": next_id,
+            "text": new_text
+        }
 
         if next_id == sp.eos_id():
             break
 
-    # text1 = sp.DecodeIds(generated_ids)
-    #
-    # pieces = [sp.IdToPiece(t) for t in generated_ids]
-    # text2 = sp.DecodePieces(pieces)
-    #
-    # print("ids decode:", repr(text1[:200]))
-    # print("pieces decode:", repr(text2[:200]))
-    # print("pieces near end:", [repr(p) for p in pieces[-30:]])
-    assistant_output = sp.DecodeIds(generated_ids)
+    # assistant_output = sp.DecodeIds(generated_ids)
     new_ids = ids[0].tolist()
 
-    return assistant_output, new_ids, generated_ids
+    yield {
+        "type": "end",
+        "generated_ids": generated_ids,
+        "new_ids": new_ids
+    }
+
+    # return assistant_output, new_ids, generated_ids
 
 def main():
-    transformer_model = model.Model.load_from("TinychatModels/tinychat_model_batch_1000")
+    transformer_model = model.Model.load_from("TinychatModels/tinychat_model_batch_13000")
+
+    # data = np.load("tinychat_ids.npy", mmap_mode="r")
+    # print(sp.IdToPiece([int(a) for a in data[:1000]]))
 
     accumulated_ids = []
     max_context = 256
 
     while True:
-        user_input = "[INST] " + input("> ").strip() + " [/INST] "
+        raw_input = input("> ").strip()
+        if raw_input == "C":
+            accumulated_ids = []
+            print("Context Cleared.")
+            continue
+        user_input = "[INST] " + raw_input + " [/INST] "
         user_input_ids = sp.EncodeAsIds(user_input)
         accumulated_ids.extend(user_input_ids)
 
-        assistant_output, accumulated_ids, generated_ids = generate(transformer_model, accumulated_ids, max_new_tokens=50, temperature=0.7)
-        print(sp.EncodeAsPieces(user_input))
-        print(sp.IdToPiece(generated_ids))
-        print(assistant_output)
-
         if len(accumulated_ids) > max_context:
             accumulated_ids = accumulated_ids[-max_context:]
+
+        print(f"Context Length: {len(accumulated_ids)}")
+        print(f"User Tokens: {sp.EncodeAsPieces(user_input)}")
+
+        for event in generate_stream(transformer_model, accumulated_ids, max_new_tokens=100, temperature=0.7):
+            if event["type"] == "token":
+                print(event["text"], end="", flush=True)
+            elif event["type"] == "end":
+                accumulated_ids = event["new_ids"]
+                print()
+
+        # assistant_output, accumulated_ids, generated_ids = generate_stream(transformer_model, accumulated_ids, max_new_tokens=100, temperature=0.7)
+
+        # print("Assistant Tokens:", sp.IdToPiece(generated_ids))
+        # print(assistant_output)
 
 if __name__ == "__main__":
     sp = spm.SentencePieceProcessor()

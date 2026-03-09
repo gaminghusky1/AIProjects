@@ -113,27 +113,27 @@ def build_ids_npy(
         text_limit_for_spm=text_limit_for_spm
     )
 
-    eos = sp.eos_id()
-    ids = []
-
-    print("Tokenizing TinyChat...")
-
-    for txt in iter_tinychat_text(split=split):
-        ids.extend(sp.EncodeAsIds(txt))
-        if add_eos_between_rows and eos != -1:
-            ids.append(eos)
-
-    ids_np = np.asarray(ids, dtype=np.int32)
-
-    np.save(out_npy_path, ids_np)
-
-    print("Saved:", out_npy_path)
-    print("Shape:", ids_np.shape)
-    print("Dtype:", ids_np.dtype)
-
-    # Quick sanity check
-    print("First 140 pieces:")
-    print([sp.IdToPiece(int(i)) for i in ids_np[:140]])
+    # eos = sp.eos_id()
+    # ids = []
+    #
+    # print("Tokenizing TinyChat...")
+    #
+    # for txt in iter_tinychat_text(split=split):
+    #     ids.extend(sp.EncodeAsIds(txt))
+    #     if add_eos_between_rows and eos != -1:
+    #         ids.append(eos)
+    #
+    # ids_np = np.asarray(ids, dtype=np.int32)
+    #
+    # np.save(out_npy_path, ids_np)
+    #
+    # print("Saved:", out_npy_path)
+    # print("Shape:", ids_np.shape)
+    # print("Dtype:", ids_np.dtype)
+    #
+    # # Quick sanity check
+    # print("First 140 pieces:")
+    # print([sp.IdToPiece(int(i)) for i in ids_np[:140]])
 
     return out_npy_path, model_path
 
@@ -191,8 +191,8 @@ def main():
     #
     # tinychat_model.compile(loss='softmax_crossentropy', optimizer='adam')
 
-    start_batch = 1000
-    end_batch = 2000
+    start_batch = 11000
+    end_batch = 13000
     final_end_batch = 20000
     tinychat_model = model.Model.load_from(f"TinychatModels/{model_name}_batch_{start_batch}")
 
