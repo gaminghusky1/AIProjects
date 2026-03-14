@@ -4,7 +4,7 @@ import mlx.core as mx
 import numpy as np
 
 def sample_next_token(probs, temperature=1.0):
-    probs[slash_inst_id] = 0.0
+    # probs[slash_inst_id] = 0.0
     probs = probs / mx.sum(probs)
 
     if temperature <= 0:
@@ -28,7 +28,7 @@ def generate_stream(transformer_model, prompt_ids, max_new_tokens=200, temperatu
         next_probs = probs[0, -1, :]
         next_id = sample_next_token(next_probs, temperature)
 
-        if next_id == inst_id:
+        if next_id == inst_id or next_id == slash_inst_id:
             break
 
         ids = mx.concatenate([ids, mx.array([[next_id]], dtype=mx.int32)], axis=1)
@@ -67,6 +67,8 @@ def main():
     accumulated_ids = []
     max_context = 256
 
+    # accumulated_ids.extend(sp.EncodeAsIds("[INST] Do you like listening to music? "))
+
     while True:
         raw_input = input("> ").strip()
         if raw_input == "C":
@@ -91,7 +93,7 @@ def main():
                 print()
 
         # assistant_output, accumulated_ids, generated_ids = generate_stream(transformer_model, accumulated_ids, max_new_tokens=100, temperature=0.7)
-
+        # print(sp.IdToPiece(accumulated_ids))
         # print("Assistant Tokens:", sp.IdToPiece(generated_ids))
         # print(assistant_output)
 
