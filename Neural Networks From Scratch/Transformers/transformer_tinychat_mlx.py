@@ -191,8 +191,8 @@ def main():
     #
     # tinychat_model.compile(loss='softmax_crossentropy', optimizer='adam')
 
-    start_batch = 11000
-    end_batch = 13000
+    start_batch = 13000
+    end_batch = 15000
     final_end_batch = 20000
     tinychat_model = model.Model.load_from(f"TinychatModels/{model_name}_batch_{start_batch}")
 

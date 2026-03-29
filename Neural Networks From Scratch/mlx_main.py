@@ -56,40 +56,47 @@ def main():
     y_train_cifar_oh = one_hot(y_train_cifar)
     y_test_cifar_oh = one_hot(y_test_cifar)
 
-    test_model = model.Model(
-        (3, 32, 32),
-        layers.Convolution(32, (3, 3), activation="relu"),
-        layers.MaxPooling((2, 2)),
-        layers.Convolution(32, (3, 3), activation="relu"),
-        layers.MaxPooling((2, 2)),
-        layers.Dense(512, activation="relu"),
-        layers.Dense(256, activation="relu"),
-        layers.Dense(128, activation="relu"),
-        layers.Dense(64, activation="relu"),
-        layers.Dense(10, activation="softmax")
-    )
-
     # test_model = model.Model(
-    #     (1, 28, 28),
-    #     # layers.Convolution(32, (3, 3), activation="relu"),
-    #     # layers.MaxPooling((2, 2)),
-    #     # layers.Convolution(32, (3, 3), activation="relu"),
-    #     # layers.MaxPooling((2, 2)),
+    #     (3, 32, 32),
+    #     layers.Convolution(32, (3, 3), activation="relu"),
+    #     layers.Convolution(32, (3, 3), activation="relu"),
+    #     layers.MaxPooling((2, 2)),
+    #     layers.Convolution(64, (3, 3), activation="relu"),
+    #     layers.Convolution(64, (3, 3), activation="relu"),
+    #     layers.MaxPooling((2, 2)),
+    #     layers.Convolution(128, (3, 3), activation="relu"),
+    #     layers.Convolution(128, (3, 3), activation="relu"),
+    #     layers.MaxPooling((2, 2)),
+    #
     #     # layers.Dense(1024, activation="relu"),
     #     # layers.Dense(512, activation="relu"),
     #     # layers.Dense(256, activation="relu"),
     #     layers.Dense(128, activation="relu"),
-    #     layers.Dense(64, activation="relu"),
+    #     # layers.Dense(64, activation="relu"),
     #     layers.Dense(10, activation="crossentropy_softmax")
     # )
 
+    test_model = model.Model(
+        (1, 28, 28),
+        # layers.Convolution(32, (3, 3), activation="relu"),
+        # layers.MaxPooling((2, 2)),
+        # layers.Convolution(32, (3, 3), activation="relu"),
+        # layers.MaxPooling((2, 2)),
+        layers.Dense(1024, activation="relu"),
+        layers.Dense(512, activation="relu"),
+        layers.Dense(256, activation="relu"),
+        layers.Dense(128, activation="relu"),
+        layers.Dense(64, activation="relu"),
+        layers.Dense(10, activation="crossentropy_softmax")
+    )
+
     test_model.compile(loss="softmax_crossentropy", optimizer="adam")
 
-    test_model.fit(x_train_cifar, y_train_cifar_oh, epochs=15, learning_rate=1e-7, batch_size=32, verbose=2)
-    print("Accuracy on test dataset: " + str(test_model.test(x_test_cifar, y_test_cifar_oh)))
+    # test_model.fit(x_train_cifar, y_train_cifar_oh, epochs=15, learning_rate=0.001, batch_size=32, verbose=2)
+    # print("Accuracy on test dataset: " + str(test_model.test(x_test_cifar, y_test_cifar_oh)))
 
-    # test_model.fit(x_train_mnist, y_train_mnist_oh, epochs=10, learning_rate=0.002, batch_size=32, verbose=2)
-    # print("Accuracy on test dataset: " + str(test_model.test(x_test_mnist, y_test_mnist_oh)))
+    test_model.fit(x_train_mnist, y_train_mnist_oh, epochs=10, learning_rate=0.002, batch_size=1000, verbose=2)
+    print("Accuracy on test dataset: " + str(test_model.test(x_test_mnist, y_test_mnist_oh)))
 
     # test_model.save_as("Models/mnist_batched_model")
 

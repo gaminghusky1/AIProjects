@@ -117,115 +117,91 @@ class Dense:
         return (self.units,)
 
 class Convolution:
-    def __init__(self, num_filters, kernel_shape, activation='linear', input_shape=None, stride=1, padding=0):
-        self.num_filters = num_filters
-        self.input_shape = input_shape
-        self.input_size = None
+    def __init__(self, num_output_channels, kernel_shape, activation='linear', input_shape=None, stride=1, padding=0):
+        self.num_output_channels = num_output_channels
         self.kernel_shape = kernel_shape
-        self.kernel_size = math.prod(kernel_shape)
-        self.kernel_stack_shape = None
-        self.kernel_stack_size = None
+        self.input_shape = input_shape
+        self.output_shape = None
+        self.stride = stride
+        self.padding = padding
+
+        self.activation_name = activation
+        self.activation = activations.Activation(activation)
+
         self.weights = None
         self.weights_gradient = None
         self.biases = None
         self.biases_gradient = None
-        self.activation_name = activation
-        self.activation = activations.Activation(activation)
-        self.stride = stride
-        self.padding = padding
-        self.output_shape = None
-        self.output_size = None
-        self.stacked_output_shape = None
-        self.dz_da = None
-
-    def precompute_dz_da(self):
-        self.dz_da = mx.zeros((*self.stacked_output_shape, *self.input_shape))
-        for f in range(self.num_filters):
-            for i in range(self.output_shape[0]):
-                for j in range(self.output_shape[1]):
-                    i_start = i * self.stride
-                    j_start = j * self.stride
-                    self.dz_da[f, i, j, :, i_start:i_start + self.kernel_shape[0], j_start:j_start + self.kernel_shape[1]] = self.weights[f]
-        self.dz_da = mx.reshape(self.dz_da, (self.num_filters, self.output_size, -1))
 
     def init_weights(self, last_layer_shape):
         if self.input_shape is None:
             self.input_shape = last_layer_shape
         if len(self.input_shape) == 2:
             self.input_shape = (1, *self.input_shape)
-        self.input_size = math.prod(self.input_shape)
-        self.kernel_stack_shape = (self.input_shape[0], *self.kernel_shape)
-        self.kernel_stack_size = math.prod(self.kernel_stack_shape)
-        self.output_shape = ((self.input_shape[1] - self.kernel_shape[0] + 2 * self.padding) // self.stride + 1, (self.input_shape[2] - self.kernel_shape[1] + 2 * self.padding) // self.stride + 1)
-        self.output_size = math.prod(self.output_shape)
-        self.stacked_output_shape = (self.num_filters, *self.output_shape)
-        self.weights = mx.random.normal((self.num_filters, *self.kernel_stack_shape)) * math.sqrt(2 / self.kernel_stack_size)
-        self.weights_gradient = mx.zeros(self.weights.shape)
-        self.biases = mx.zeros(self.num_filters)
-        self.biases_gradient = mx.zeros(self.biases.shape)
 
-        self.precompute_dz_da()
-        mx.eval(self.weights, self.biases, self.weights_gradient, self.biases_gradient, self.dz_da)
+        self.output_shape = (
+            self.num_output_channels,
+            (self.input_shape[1] + 2 * self.padding - self.kernel_shape[0]) // self.stride + 1,
+            (self.input_shape[2] + 2 * self.padding - self.kernel_shape[1]) // self.stride + 1
+        )
+
+        fan_in = self.input_shape[0] * self.kernel_shape[0] * self.kernel_shape[1]
+        self.weights = mx.random.normal((self.num_output_channels, self.input_shape[0], *self.kernel_shape)) * math.sqrt(2.0 / fan_in)
+        self.weights_gradient = mx.zeros_like(self.weights)
+
+        self.biases = mx.zeros(self.num_output_channels)
+        self.biases_gradient = mx.zeros_like(self.biases)
+
+        mx.eval(self.weights, self.biases, self.weights_gradient, self.biases_gradient)
+
+    def get_windows(self, prev_layer_activations, batch_size):
+        prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, *self.input_shape))
+        padded_input = mx.pad(prev_layer_activations, [(0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)], mode='constant', constant_values=0)
+        windows = sliding_window_view(padded_input, window_shape=self.kernel_shape, axis=(2, 3))
+        # batch, input_channel, window_h, window_w, kernel_h, kernel_w
+        return windows[:, :, ::self.stride, ::self.stride, :, :], padded_input.shape
 
     def get_output(self, prev_layer_activations, batch_size=1):
         a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
         return a_output
 
-    def get_windows(self, prev_layer_activations, batch_size):
-        prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, *self.input_shape))
-        prev_layer_activations = mx.pad(prev_layer_activations, [(0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)], mode='constant', constant_values=0)
-        windows = sliding_window_view(prev_layer_activations, window_shape=self.kernel_shape, axis=(2, 3))
-        windows = windows[:, :, ::self.stride, ::self.stride, :, :].transpose((0, 2, 3, 1, 4, 5))
-        windows = mx.reshape(windows, (batch_size, self.output_size, self.kernel_stack_size))
-        return windows
-
     def forward_pass(self, prev_layer_activations, batch_size):
-        windows = self.get_windows(prev_layer_activations, batch_size)
-        flattened_weights = mx.reshape(self.weights, (self.num_filters, self.kernel_stack_size))
-        z_output = mx.einsum('bok,fk->bfo', windows, flattened_weights)
-        z_output = mx.reshape(z_output, (batch_size, self.num_filters, *self.output_shape))
-        z_output = z_output + self.biases[:, mx.newaxis, mx.newaxis]
-        # for f in range(self.num_filters):
-        #     weight_matrix = self.weights[f]
-        #     bias = self.biases[f]
-        #     for i in range(self.output_shape[0]):
-        #         for j in range(self.output_shape[1]):
-        #             i_start = i * self.stride
-        #             j_start = j * self.stride
-        #             prev_layer_activations_window = prev_layer_activations[:, i_start:i_start + self.kernel_shape[0], j_start:j_start + self.kernel_shape[1]]
-        #             z_output[f, i, j] = np.sum(prev_layer_activations_window * weight_matrix) + bias
+        windows, padded_input_shape = self.get_windows(prev_layer_activations, batch_size)
+
+        # weights are (output_channel, input_channel, kernel_h, kernel_w)
+        # for each singular output, patches of shape (input_channel, kernel_h, kernel_w) from the input are elementwise
+        # multiplied with the weight filter of the same shape corresponding to the specific output channel, and then summed
+        z_output = mx.einsum('bcijhw,ochw->boij', windows, self.weights)
+        z_output += self.biases[mx.newaxis, :, mx.newaxis, mx.newaxis]
+
         a_output = self.activation(z_output)
-        return a_output, z_output
+        return a_output, (z_output, windows, padded_input_shape)
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
-        curr_layer_z = mx.reshape(curr_layer_z, (batch_size, self.num_filters, self.output_size))
-        dc_da = mx.reshape(dc_da, (batch_size, self.num_filters, self.output_size))
-        da_dz = self.activation.derivative(curr_layer_z)
+        z_output, windows, padded_input_shape = curr_layer_z
+        dc_da = mx.reshape(dc_da, (batch_size, *self.output_shape))
+        da_dz = self.activation.derivative(z_output)
         if self.activation.elementwise:
             dc_dz = dc_da * da_dz
         else:
-            dc_dz = mx.einsum('bfi,bfij->bfj', dc_da, da_dz)
+            raise NotImplementedError("Non-elementwise activations not implemented for Convolution!")
 
-        windows = self.get_windows(prev_layer_activations, batch_size)
-        # dz_dw = np.zeros((*self.stacked_output_shape, *self.kernel_stack_shape))
-        # for f in range(self.num_filters):
-        #     for i in range(self.output_shape[0]):
-        #         for j in range(self.output_shape[1]):
-        #             i_start = i * self.stride
-        #             j_start = j * self.stride
-        #             dz_dw[f, i, j, :, :, :] = prev_layer_activations[:, i_start:i_start + self.kernel_shape[0], j_start:j_start + self.kernel_shape[1]]
-        # dz_dw = np.transpose(dz_dw, (0, 3, 4, 5, 1, 2))
-        # dz_dw = np.reshape(dz_dw, (self.num_filters, self.kernel_stack_size, -1))
+        # biases affect each element in z_output by a factor of 1, so we simply sum up across batches and kernels of dc_dz
+        self.biases_gradient += mx.sum(dc_dz, axis=(0, 2, 3))
 
-        dc_dw = mx.einsum('bfo,bok->fk', dc_dz, windows)
-        self.weights_gradient = self.weights_gradient + mx.reshape(dc_dw, (self.num_filters, *self.kernel_stack_shape))
-        self.biases_gradient = self.biases_gradient + mx.sum(dc_dz, axis=(0, 2))
-        dc_da = mx.einsum('bfo,foi->bi', dc_dz, self.dz_da)
-        return dc_da
+        self.weights_gradient += mx.einsum('bcijhw,boij->ochw', windows, dc_dz)
+
+        dc_da_prev = mx.zeros(padded_input_shape)
+
+        for i in range(self.output_shape[1]):
+            for j in range(self.output_shape[2]):
+                dc_da_prev[:, :, i * self.stride:i * self.stride + self.kernel_shape[0], j * self.stride:j * self.stride + self.kernel_shape[1]] += mx.einsum('bo,ochw->bchw', dc_dz[:, :, i, j], self.weights)
+
+        return dc_da_prev[:, :, self.padding:-self.padding, self.padding:-self.padding] if self.padding != 0 else dc_da_prev
 
     def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights = self.weights - learning_rate * self.weights_gradient
-        self.biases = self.biases - learning_rate * self.biases_gradient
+        self.weights -= learning_rate * self.weights_gradient
+        self.biases -= learning_rate * self.biases_gradient
 
         mx.eval(self.weights, self.biases)
 
@@ -233,8 +209,7 @@ class Convolution:
         self.weights_gradient = mx.zeros_like(self.weights)
         self.biases_gradient = mx.zeros_like(self.biases)
 
-        self.precompute_dz_da()
-        mx.eval(self.weights_gradient, self.biases_gradient, self.dz_da)
+        mx.eval(self.weights_gradient, self.biases_gradient)
 
     def get_param_refs(self):
         return [(self, "weights"), (self, "biases")]
@@ -246,7 +221,7 @@ class Convolution:
         return math.prod(self.weights.shape) + math.prod(self.biases.shape)
 
     def get_output_shape(self):
-        return self.stacked_output_shape
+        return self.output_shape
 
 class MaxPooling:
     def __init__(self, pool_size, stride=1, padding=0, input_shape=None):
@@ -884,3 +859,136 @@ class TimeDistributedDense:
 
     def get_output_shape(self):
         return self.output_shape
+
+# Old Convolution layer; doesn't work, likely because too many axes were condensed together
+class OldConvolution:
+    def __init__(self, num_filters, kernel_shape, activation='linear', input_shape=None, stride=1, padding=0):
+        self.num_filters = num_filters
+        self.input_shape = input_shape
+        self.input_size = None
+        self.kernel_shape = kernel_shape
+        self.kernel_size = math.prod(kernel_shape)
+        self.kernel_stack_shape = None
+        self.kernel_stack_size = None
+        self.weights = None
+        self.weights_gradient = None
+        self.biases = None
+        self.biases_gradient = None
+        self.activation_name = activation
+        self.activation = activations.Activation(activation)
+        self.stride = stride
+        self.padding = padding
+        self.output_shape = None
+        self.output_size = None
+        self.stacked_output_shape = None
+        self.dz_da = None
+
+    def precompute_dz_da(self):
+        self.dz_da = mx.zeros((*self.stacked_output_shape, *self.input_shape))
+        for f in range(self.num_filters):
+            for i in range(self.output_shape[0]):
+                for j in range(self.output_shape[1]):
+                    i_start = i * self.stride
+                    j_start = j * self.stride
+                    self.dz_da[f, i, j, :, i_start:i_start + self.kernel_shape[0], j_start:j_start + self.kernel_shape[1]] = self.weights[f]
+        self.dz_da = mx.reshape(self.dz_da, (self.num_filters, self.output_size, -1))
+
+    def init_weights(self, last_layer_shape):
+        if self.input_shape is None:
+            self.input_shape = last_layer_shape
+        if len(self.input_shape) == 2:
+            self.input_shape = (1, *self.input_shape)
+        self.input_size = math.prod(self.input_shape)
+        self.kernel_stack_shape = (self.input_shape[0], *self.kernel_shape)
+        self.kernel_stack_size = math.prod(self.kernel_stack_shape)
+        self.output_shape = ((self.input_shape[1] - self.kernel_shape[0] + 2 * self.padding) // self.stride + 1, (self.input_shape[2] - self.kernel_shape[1] + 2 * self.padding) // self.stride + 1)
+        self.output_size = math.prod(self.output_shape)
+        self.stacked_output_shape = (self.num_filters, *self.output_shape)
+        self.weights = mx.random.normal((self.num_filters, *self.kernel_stack_shape)) * math.sqrt(2 / self.kernel_stack_size)
+        self.weights_gradient = mx.zeros(self.weights.shape)
+        self.biases = mx.zeros(self.num_filters)
+        self.biases_gradient = mx.zeros(self.biases.shape)
+
+        self.precompute_dz_da()
+        mx.eval(self.weights, self.biases, self.weights_gradient, self.biases_gradient, self.dz_da)
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def get_windows(self, prev_layer_activations, batch_size):
+        prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, *self.input_shape))
+        prev_layer_activations = mx.pad(prev_layer_activations, [(0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)], mode='constant', constant_values=0)
+        windows = sliding_window_view(prev_layer_activations, window_shape=self.kernel_shape, axis=(2, 3))
+        windows = windows[:, :, ::self.stride, ::self.stride, :, :].transpose((0, 2, 3, 1, 4, 5))
+        windows = mx.reshape(windows, (batch_size, self.output_size, self.kernel_stack_size))
+        return windows
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        windows = self.get_windows(prev_layer_activations, batch_size)
+        flattened_weights = mx.reshape(self.weights, (self.num_filters, self.kernel_stack_size))
+        z_output = mx.einsum('bok,fk->bfo', windows, flattened_weights)
+        z_output = mx.reshape(z_output, (batch_size, self.num_filters, *self.output_shape))
+        z_output = z_output + self.biases[:, mx.newaxis, mx.newaxis]
+        # for f in range(self.num_filters):
+        #     weight_matrix = self.weights[f]
+        #     bias = self.biases[f]
+        #     for i in range(self.output_shape[0]):
+        #         for j in range(self.output_shape[1]):
+        #             i_start = i * self.stride
+        #             j_start = j * self.stride
+        #             prev_layer_activations_window = prev_layer_activations[:, i_start:i_start + self.kernel_shape[0], j_start:j_start + self.kernel_shape[1]]
+        #             z_output[f, i, j] = np.sum(prev_layer_activations_window * weight_matrix) + bias
+        a_output = self.activation(z_output)
+        return a_output, z_output
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        curr_layer_z = mx.reshape(curr_layer_z, (batch_size, self.num_filters, self.output_size))
+        dc_da = mx.reshape(dc_da, (batch_size, self.num_filters, self.output_size))
+        da_dz = self.activation.derivative(curr_layer_z)
+        if self.activation.elementwise:
+            dc_dz = dc_da * da_dz
+        else:
+            dc_dz = mx.einsum('bfi,bfij->bfj', dc_da, da_dz)
+
+        windows = self.get_windows(prev_layer_activations, batch_size)
+        # dz_dw = np.zeros((*self.stacked_output_shape, *self.kernel_stack_shape))
+        # for f in range(self.num_filters):
+        #     for i in range(self.output_shape[0]):
+        #         for j in range(self.output_shape[1]):
+        #             i_start = i * self.stride
+        #             j_start = j * self.stride
+        #             dz_dw[f, i, j, :, :, :] = prev_layer_activations[:, i_start:i_start + self.kernel_shape[0], j_start:j_start + self.kernel_shape[1]]
+        # dz_dw = np.transpose(dz_dw, (0, 3, 4, 5, 1, 2))
+        # dz_dw = np.reshape(dz_dw, (self.num_filters, self.kernel_stack_size, -1))
+
+        dc_dw = mx.einsum('bfo,bok->fk', dc_dz, windows)
+        self.weights_gradient = self.weights_gradient + mx.reshape(dc_dw, (self.num_filters, *self.kernel_stack_shape))
+        self.biases_gradient = self.biases_gradient + mx.sum(dc_dz, axis=(0, 2))
+        dc_da = mx.einsum('bfo,foi->bi', dc_dz, self.dz_da)
+        return dc_da
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        self.weights = self.weights - learning_rate * self.weights_gradient
+        self.biases = self.biases - learning_rate * self.biases_gradient
+
+        mx.eval(self.weights, self.biases)
+
+    def reset_grads(self):
+        self.weights_gradient = mx.zeros_like(self.weights)
+        self.biases_gradient = mx.zeros_like(self.biases)
+
+        self.precompute_dz_da()
+        mx.eval(self.weights_gradient, self.biases_gradient, self.dz_da)
+
+    def get_param_refs(self):
+        return [(self, "weights"), (self, "biases")]
+
+    def get_grads(self):
+        return [self.weights_gradient, self.biases_gradient]
+
+    def get_param_count(self):
+        return math.prod(self.weights.shape) + math.prod(self.biases.shape)
+
+    def get_output_shape(self):
+        return self.stacked_output_shape

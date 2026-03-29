@@ -59,7 +59,7 @@ def generate_stream(transformer_model, prompt_ids, max_new_tokens=200, temperatu
     # return assistant_output, new_ids, generated_ids
 
 def main():
-    transformer_model = model.Model.load_from("TinychatModels/tinychat_model_batch_13000")
+    transformer_model = model.Model.load_from("TinychatModels/tinychat_model_batch_15000")
 
     # data = np.load("tinychat_ids.npy", mmap_mode="r")
     # print(sp.IdToPiece([int(a) for a in data[:1000]]))
