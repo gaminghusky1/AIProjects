@@ -56,8 +56,8 @@ class Dense:
         self.biases -= learning_rate * self.biases_gradient
 
     def reset_grads(self):
-        self.weights_gradient.fill(0)
-        self.biases_gradient.fill(0)
+        self.weights_gradient.fill(0.0)
+        self.biases_gradient.fill(0.0)
 
     def get_params(self):
         return [self.weights, self.biases]
@@ -157,8 +157,8 @@ class Convolution:
         self.biases -= learning_rate * self.biases_gradient
 
     def reset_grads(self):
-        self.weights_gradient.fill(0)
-        self.biases_gradient.fill(0)
+        self.weights_gradient.fill(0.0)
+        self.biases_gradient.fill(0.0)
 
     def get_params(self):
         return [self.weights, self.biases]
@@ -287,7 +287,7 @@ class TokenEmbedding:
         self.weights -= learning_rate * self.weights_gradient
 
     def reset_grads(self):
-        self.weights_gradient.fill(0)
+        self.weights_gradient.fill(0.0)
 
     def get_params(self):
         return [self.weights]
@@ -335,7 +335,7 @@ class PositionalEmbedding:
         self.weights -= learning_rate * self.weights_gradient
 
     def reset_grads(self):
-        self.weights_gradient.fill(0)
+        self.weights_gradient.fill(0.0)
 
     def get_params(self):
         return [self.weights]
@@ -396,8 +396,8 @@ class LayerNorm:
         self.shift -= learning_rate * self.shift_gradient
 
     def reset_grads(self):
-        self.scale_gradient.fill(0)
-        self.shift_gradient.fill(0)
+        self.scale_gradient.fill(0.0)
+        self.shift_gradient.fill(0.0)
 
     def get_params(self):
         return [self.scale, self.shift]
@@ -544,11 +544,11 @@ class Attention:
         self.b_o -= learning_rate * self.b_o_gradient
 
     def reset_grads(self):
-        self.w_q_gradient.fill(0)
-        self.w_k_gradient.fill(0)
-        self.w_v_gradient.fill(0)
-        self.w_o_gradient.fill(0)
-        self.b_o_gradient.fill(0)
+        self.w_q_gradient.fill(0.0)
+        self.w_k_gradient.fill(0.0)
+        self.w_v_gradient.fill(0.0)
+        self.w_o_gradient.fill(0.0)
+        self.b_o_gradient.fill(0.0)
 
     def get_params(self):
         return [self.w_q, self.w_k, self.w_v, self.w_o, self.b_o]
@@ -636,10 +636,10 @@ class MultilayerPerceptron:
         self.down_biases -= learning_rate * self.down_biases_gradient
 
     def reset_grads(self):
-        self.up_weights_gradient.fill(0)
-        self.up_biases_gradient.fill(0)
-        self.down_weights_gradient.fill(0)
-        self.down_biases_gradient.fill(0)
+        self.up_weights_gradient.fill(0.0)
+        self.up_biases_gradient.fill(0.0)
+        self.down_weights_gradient.fill(0.0)
+        self.down_biases_gradient.fill(0.0)
 
     def get_params(self):
         return [self.up_weights, self.up_biases, self.down_weights, self.down_biases]
@@ -767,8 +767,8 @@ class TimeDistributedDense:
         self.biases -= learning_rate * self.biases_gradient
 
     def reset_grads(self):
-        self.weights_gradient.fill(0)
-        self.biases_gradient.fill(0)
+        self.weights_gradient.fill(0.0)
+        self.biases_gradient.fill(0.0)
 
     def get_params(self):
         return [self.weights, self.biases]
@@ -894,8 +894,8 @@ class OldConvolution:
         self.biases -= learning_rate * self.biases_gradient
 
     def reset_grads(self):
-        self.weights_gradient.fill(0)
-        self.biases_gradient.fill(0)
+        self.weights_gradient.fill(0.0)
+        self.biases_gradient.fill(0.0)
 
         self.precompute_dz_da()
 
