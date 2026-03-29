@@ -2,6 +2,149 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from base_model import activations
 
+# Just a template; not to be actually used
+class Template:
+    def __init__(self):
+        pass
+
+    def init_weights(self, last_layer_shape):
+        pass
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        pass
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        pass
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        pass
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        pass
+
+    def reset_grads(self):
+        pass
+
+    def get_params(self):
+        pass
+
+    def get_grads(self):
+        pass
+
+    def get_param_count(self):
+        pass
+
+    def get_output_shape(self):
+        pass
+
+
+class Flatten:
+    def __init__(self):
+        self.output_shape = None
+
+    def init_weights(self, last_layer_shape):
+        self.output_shape = (np.prod(last_layer_shape),)
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        return np.reshape(prev_layer_activations, (batch_size, -1)), None
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        return np.reshape(dc_da, prev_layer_activations.shape)
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        pass
+
+    def reset_grads(self):
+        pass
+
+    def get_params(self):
+        return []
+
+    def get_grads(self):
+        return []
+
+    def get_param_count(self):
+        return 0
+
+    def get_output_shape(self):
+        return self.output_shape
+
+class Reshape:
+    def __init__(self, new_shape):
+        self.output_shape = new_shape
+
+    def init_weights(self, last_layer_shape):
+        pass
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        return np.reshape(prev_layer_activations, (batch_size, self.output_shape)), None
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        return np.reshape(dc_da, prev_layer_activations.shape)
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        pass
+
+    def reset_grads(self):
+        pass
+
+    def get_params(self):
+        return []
+
+    def get_grads(self):
+        return []
+
+    def get_param_count(self):
+        return 0
+
+    def get_output_shape(self):
+        return self.output_shape
+
+class Dropout:
+    def __init__(self, dropout_rate):
+        self.dropout_rate = dropout_rate
+        self.scale = 1 / (1 - self.dropout_rate)
+        self.output_shape = None
+
+    def init_weights(self, last_layer_shape):
+        self.output_shape = last_layer_shape
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        return prev_layer_activations
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        mask = (np.random.rand(prev_layer_activations.shape) < (1 - self.dropout_rate)).astype(np.float32)
+        return prev_layer_activations * mask * self.scale, mask
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        return dc_da * curr_layer_z * self.scale
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        pass
+
+    def reset_grads(self):
+        pass
+
+    def get_params(self):
+        return []
+
+    def get_grads(self):
+        return []
+
+    def get_param_count(self):
+        return 0
+
+    def get_output_shape(self):
+        return self.output_shape
+
 class Dense:
     def __init__(self, units, activation='linear'):
         self.units = units
@@ -26,16 +169,16 @@ class Dense:
         return a_output
 
     def forward_pass(self, prev_layer_activations, batch_size):
-        prev_layer_activations = prev_layer_activations.reshape((batch_size, -1))
+        # prev_layer_activations = prev_layer_activations.reshape((batch_size, -1))
         z_output = np.dot(prev_layer_activations, self.weights) + self.biases
         a_output = self.activation(z_output)
 
         return a_output, z_output
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
-        prev_layer_activations = prev_layer_activations.reshape((batch_size, -1))
-        curr_layer_z = curr_layer_z.reshape((batch_size, -1))
-        dc_da = dc_da.reshape((batch_size, -1))
+        # prev_layer_activations = prev_layer_activations.reshape((batch_size, -1))
+        # curr_layer_z = curr_layer_z.reshape((batch_size, -1))
+        # dc_da = dc_da.reshape((batch_size, -1))
         if self.activation.elementwise:
             dc_dz = dc_da * self.activation.derivative(curr_layer_z)
         else:
@@ -108,7 +251,7 @@ class Convolution:
         self.biases_gradient = np.zeros_like(self.biases)
 
     def get_windows(self, prev_layer_activations, batch_size):
-        prev_layer_activations = prev_layer_activations.reshape((batch_size, *self.input_shape))
+        # prev_layer_activations = prev_layer_activations.reshape((batch_size, *self.input_shape))
         padded_input = np.pad(prev_layer_activations, ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)), mode='constant', constant_values=0)
         windows = sliding_window_view(padded_input, window_shape=self.kernel_shape, axis=(2, 3))
         # batch, input_channel, window_h, window_w, kernel_h, kernel_w
@@ -132,7 +275,7 @@ class Convolution:
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
         z_output, windows, padded_input_shape = curr_layer_z
-        dc_da = dc_da.reshape((batch_size, *self.output_shape))
+        # dc_da = dc_da.reshape((batch_size, *self.output_shape))
         da_dz = self.activation.derivative(z_output)
         if self.activation.elementwise:
             dc_dz = dc_da * da_dz
@@ -194,7 +337,7 @@ class MaxPooling:
         return a_output
 
     def forward_pass(self, prev_layer_activations, batch_size):
-        prev_layer_activations = prev_layer_activations.reshape((batch_size, *self.input_shape))
+        # prev_layer_activations = prev_layer_activations.reshape((batch_size, *self.input_shape))
         prev_layer_activations = np.pad(prev_layer_activations, ((0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)), mode='constant', constant_values=0)
         # a_output = np.zeros(self.output_shape)
         windows = sliding_window_view(prev_layer_activations, window_shape=self.pool_size, axis=(2, 3))
@@ -212,7 +355,7 @@ class MaxPooling:
         return a_output, windows
 
     def backward_pass(self, prev_layer_activations, windows, dc_da, batch_size):
-        prev_layer_activations = prev_layer_activations.reshape((batch_size, *self.input_shape))
+        # prev_layer_activations = prev_layer_activations.reshape((batch_size, *self.input_shape))
         # dc_da = dc_da.reshape(self.output_shape)
         # prev_layer_activations = np.pad(prev_layer_activations, ((0, 0), (self.padding, self.padding), (self.padding, self.padding)), mode='constant', constant_values=0)
         # prev_dc_da = np.zeros(self.input_shape)
@@ -225,7 +368,7 @@ class MaxPooling:
         #             idx = np.unravel_index(max_indices[c, i, j], prev_layer_activations_window.shape)
         #             prev_dc_da[c, i_start + idx[0], j_start + idx[1]] += dc_da[c, i, j]
         max_areas = (windows == np.max(windows, axis=(4, 5), keepdims=True))
-        dc_da = dc_da.reshape((batch_size, *self.output_shape))
+        # dc_da = dc_da.reshape((batch_size, *self.output_shape))
         max_areas_scaled = max_areas * dc_da[..., np.newaxis, np.newaxis]
         prev_dc_da = np.zeros_like(prev_layer_activations)
         for i in range(self.output_shape[1]):

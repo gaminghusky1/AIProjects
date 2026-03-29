@@ -14,8 +14,8 @@ def load_mnist():
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
 
     # Reshape into vectors
-    x_train = x_train.reshape(60000, 784)
-    x_test = x_test.reshape(10000, 784)
+    # x_train = x_train.reshape(60000, 784)
+    # x_test = x_test.reshape(10000, 784)
 
     # Normalize
     x_train = x_train / 255.0
@@ -28,8 +28,8 @@ def load_cifar():
     x_train = np.transpose(x_train, (0, 3, 1, 2))
     x_test = np.transpose(x_test, (0, 3, 1, 2))
 
-    x_train = x_train.reshape(50000, 3072)
-    x_test = x_test.reshape(10000, 3072)
+    # x_train = x_train.reshape(50000, 3072)
+    # x_test = x_test.reshape(10000, 3072)
     y_train = y_train.flatten()
     y_test = y_test.flatten()
 
@@ -61,6 +61,7 @@ def main():
         layers.MaxPooling((2, 2)),
         layers.Convolution(32, (3, 3), activation="relu"),
         layers.MaxPooling((2, 2)),
+        layers.Flatten(),
         layers.Dense(512, activation="relu"),
         layers.Dense(256, activation="relu"),
         layers.Dense(128, activation="relu"),
