@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from base_model import loss_functions
 from base_model import optimizers
 from pathlib import Path
@@ -10,6 +11,9 @@ def to_ohe(y_batch, vocab_size):
     ohe[np.arange(b)[:, np.newaxis], np.arange(t), y_batch] = 1.0
     return ohe
 
+def default_lr_function(step):
+    return 1
+
 class Model:
     def __init__(self, input_shape, *layers):
         self.input_shape = input_shape
@@ -17,6 +21,7 @@ class Model:
         self.loss_func_name = None
         self.loss_func = None
         self.optimizer = None
+        self.metrics = None
         self.compiled = False
         self.curr_loss = 0
         self.curr_accuracy = 0
@@ -46,14 +51,21 @@ class Model:
         for i in reversed(range(len(self.layers))):
             dc_da = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da, batch_size)
 
-    def fit(self, x, y, epochs, learning_rate=0.01, batch_size=1, shuffle=True, verbose=1, y_ohe=True, save_after_each_epoch=False, path="model"):
+    def fit(self, x, y, epochs, learning_rate=0.01, lr_function=default_lr_function, curr_step=0, batch_size=1, ema_beta=0.99, shuffle=True, verbose=1, y_ohe=True, save_after_num_epochs=-1, model_save_path="model", save_metrics=False):
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
-        if self.optimizer is not None:
-            self.optimizer.learning_rate = learning_rate
         if verbose >= 0:
             print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
+
+        ema_loss = None
+        if save_metrics:
+            try:
+                self.metrics = pd.read_csv(model_save_path + "_metrics.csv", index_col=0)
+                curr_step = len(self.metrics)
+                ema_loss = self.metrics.loc[curr_step - 1]["ema_loss"]
+            except FileNotFoundError:
+                self.metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
 
         data_len = len(x)
         for i in range(epochs):
@@ -62,8 +74,8 @@ class Model:
                 np.random.shuffle(indices)
                 x, y = x[indices], y[indices]
 
-            loss_sum = 0
-            num_correct = 0
+            epoch_loss_sum = 0
+            epoch_num_correct = 0
 
             idx = 0
             while idx < data_len:
@@ -75,12 +87,13 @@ class Model:
                     y_batch = to_ohe(y_batch, self.layers[-1].get_output_shape()[-1])
 
                 a_outputs, z_outputs = self.forward_propagate(x_batch, curr_batch_size)
-                loss_sum += np.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size
-                num_correct += np.mean(np.argmax(a_outputs[-1], axis=-1) == np.argmax(y_batch, axis=-1)) * curr_batch_size
+                batch_loss_sum = np.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size
+                batch_num_correct = np.mean(np.argmax(a_outputs[-1], axis=-1) == np.argmax(y_batch, axis=-1)) * curr_batch_size
 
                 self.backward_propagate(a_outputs, z_outputs, y_batch, curr_batch_size)
 
                 if self.optimizer is not None:
+                    self.optimizer.learning_rate = learning_rate * lr_function(curr_step)
                     params = []
                     grads = []
                     for layer in self.layers:
@@ -89,23 +102,36 @@ class Model:
                     self.optimizer.step(params, grads)
                 else:
                     for layer in self.layers:
-                        layer.update_weights_and_biases(learning_rate, curr_batch_size)
+                        layer.update_weights_and_biases(learning_rate * lr_function(curr_step), curr_batch_size)
 
                 for layer in self.layers:
                     layer.reset_grads()
 
                 idx += curr_batch_size
+                if ema_loss is None:
+                    ema_loss = batch_loss_sum / curr_batch_size
+                else:
+                    ema_loss = ema_beta * ema_loss + (1 - ema_beta) * batch_loss_sum / curr_batch_size
+                if save_metrics:
+                    self.metrics.loc[curr_step] = {"loss": batch_loss_sum / curr_batch_size, "ema_loss": ema_loss, "accuracy": batch_num_correct.item() / curr_batch_size}
+                epoch_loss_sum += batch_loss_sum
+                epoch_num_correct += batch_num_correct
+                curr_step += 1
                 if verbose > 1:
-                    print(f"Epoch: {i + 1}/{epochs}; Batch: {idx // batch_size + (idx % batch_size != 0)}/{(data_len + batch_size - 1) // batch_size}; Loss: {loss_sum / idx:.5f}; Accuracy: {num_correct / idx:.5f}")
+                    print(f"Epoch {i + 1}/{epochs}, Batch {idx // batch_size + (idx % batch_size != 0)}/{(data_len + batch_size - 1) // batch_size}; Loss: {batch_loss_sum / curr_batch_size:.5f}; Accuracy: {batch_num_correct / curr_batch_size:.5f}; EMA Loss: {ema_loss:.5f}; Avg Loss: {epoch_loss_sum / idx:.5f}; Avg Accuracy: {epoch_num_correct / idx:.5f}")
 
-            self.curr_loss = loss_sum / data_len
-            self.curr_accuracy = num_correct / data_len
+            self.curr_loss = epoch_loss_sum / data_len
+            self.curr_accuracy = epoch_num_correct / data_len
             if verbose > 0:
-                print(f"Epoch {i+1}/{epochs} finished with loss of {loss_sum / data_len:.5f} and accuracy of {num_correct / data_len:.5f}")
-            if save_after_each_epoch:
-                self.save_as(path + f"_epoch_{i+1}")
+                print(f"Epoch {i+1}/{epochs} finished with loss of {epoch_loss_sum / data_len:.5f} and accuracy of {epoch_num_correct / data_len:.5f}")
+            if save_after_num_epochs > 0 and (i + 1) % save_after_num_epochs == 0:
+                self.save_as(model_save_path + f"_epoch_{i + 1}")
+                if save_metrics:
+                    self.metrics.to_csv(model_save_path + "_metrics.csv")
         if verbose >= 0:
             print("Training completed.")
+        if save_metrics:
+            self.metrics.to_csv(model_save_path + "_metrics.csv")
 
     def predict(self, x):
         y_hat = x

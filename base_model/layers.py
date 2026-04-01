@@ -121,7 +121,7 @@ class Dropout:
         return prev_layer_activations
 
     def forward_pass(self, prev_layer_activations, batch_size):
-        mask = (np.random.rand(prev_layer_activations.shape) < (1 - self.dropout_rate)).astype(np.float32)
+        mask = (np.random.rand(*prev_layer_activations.shape) < (1 - self.dropout_rate)).astype(np.float32)
         return prev_layer_activations * mask * self.scale, mask
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):

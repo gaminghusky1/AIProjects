@@ -130,7 +130,7 @@ def main():
 
     transformer_model.compile(loss='softmax_crossentropy', optimizer='adam')
 
-    transformer_model.fit(x_train, y_train, epochs=20, learning_rate=0.005, batch_size=16, verbose=2, y_ohe=True, save_after_each_epoch=False, path="Models/transformer_model_20_epochs")
+    transformer_model.fit(x_train, y_train, epochs=20, learning_rate=0.005, batch_size=16, verbose=2, y_ohe=True, save_after_each_epoch=False, model_save_path="Models/transformer_model_20_epochs")
 
     # print("Accuracy on test dataset:", transformer_model.test(x_test, y_test, y_ohe=False))
 

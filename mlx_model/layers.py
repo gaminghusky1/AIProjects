@@ -123,7 +123,7 @@ class Reshape:
         return a_output
 
     def forward_pass(self, prev_layer_activations, batch_size):
-        return mx.reshape(prev_layer_activations, (batch_size, self.output_shape)), None
+        return mx.reshape(prev_layer_activations, (batch_size, *self.output_shape)), None
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
         return mx.reshape(dc_da, prev_layer_activations.shape)
