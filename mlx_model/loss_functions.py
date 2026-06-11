@@ -18,10 +18,41 @@ def categorical_crossentropy_derivative(y, y_hat):
 def softmax_crossentropy_derivative(y, y_hat):
     return (y_hat - y) / (math.prod(y.shape) / y.shape[-1])
 
+def sparse_softmax_crossentropy(y, y_hat):
+    logits_stable = y_hat - mx.max(y_hat, axis=-1, keepdims=True)
+    logsumexp = mx.log(mx.sum(mx.exp(logits_stable), axis=-1))
+
+    b, t, v = y_hat.shape
+
+    true_logits = logits_stable[
+        mx.arange(b)[:, mx.newaxis],
+        mx.arange(t)[mx.newaxis, :],
+        y
+    ]
+
+    return mx.mean(logsumexp - true_logits)
+
+def sparse_softmax_crossentropy_derivative(y, y_hat):
+    logits_stable = y_hat - mx.max(y_hat, axis=-1, keepdims=True)
+    exp_logits = mx.exp(logits_stable)
+    probs = exp_logits / mx.sum(exp_logits, axis=-1, keepdims=True)
+
+    b, t, v = y_hat.shape
+
+    grad = probs
+    grad[
+        mx.arange(b)[:, mx.newaxis],
+        mx.arange(t)[mx.newaxis, :],
+        y
+    ] -= 1.0
+
+    return grad / (b * t)
+
 loss_func_dict = {
     'mse': [mse, mse_derivative],
     'categorical_crossentropy': [categorical_crossentropy, categorical_crossentropy_derivative],
     'softmax_crossentropy': [categorical_crossentropy, softmax_crossentropy_derivative],
+    'sparse_softmax_crossentropy': [sparse_softmax_crossentropy, sparse_softmax_crossentropy_derivative],
 }
 
 class LossFunction:

@@ -1,15 +1,10 @@
-import mlx.core as mx
+import numpy as np
 from keras.datasets import mnist
-from mlx_model import *
+from base_model import *
 
 def load_mnist():
     # Read in dataset
     (x_train, y_train), (x_test, y_test) = mnist.load_data()
-
-    x_train = mx.array(x_train)
-    y_train = mx.array(y_train)
-    x_test = mx.array(x_test)
-    y_test = mx.array(y_test)
 
     # Reshape into vectors
     # x_train = x_train.reshape(60000, 784)
@@ -19,12 +14,10 @@ def load_mnist():
     x_train = x_train / 255.0
     x_test = x_test / 255.0
 
-    mx.eval(x_train, y_train, x_test, y_test)
-
     return x_train, y_train, x_test, y_test
 
 def one_hot(y, classes=10):
-    return mx.eye(classes)[y]
+    return np.eye(classes)[y]
 
 def main():
     x_train, y_train, x_test, y_test = load_mnist()
@@ -54,7 +47,7 @@ def main():
 
     print("Param Count:", mnist_model.get_param_count())
 
-    mnist_model.fit(x_train, y_train_oh, epochs=30, learning_rate=0.001, batch_size=32, verbose=2) #, save_after_num_epochs=30, model_save_path="Models/test", save_metrics=True)
+    mnist_model.fit(x_train, y_train_oh, epochs=30, learning_rate=0.001, batch_size=256, verbose=1) #, save_after_num_epochs=30, model_save_path="Models/test", save_metrics=True)
     print("Accuracy on test dataset: " + str(mnist_model.test(x_test, y_test_oh)))
 
     # mnist_model.save_as("Models/mnist_model")

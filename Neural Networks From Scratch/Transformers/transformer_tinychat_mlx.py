@@ -191,8 +191,8 @@ def main():
     #
     # tinychat_model.compile(loss='softmax_crossentropy', optimizer='adam')
 
-    start_batch = 13000
-    end_batch = 15000
+    start_batch = 15000
+    end_batch = 17000
     final_end_batch = 20000
     tinychat_model = model.Model.load_from(f"TinychatModels/{model_name}_batch_{start_batch}")
 
@@ -212,7 +212,7 @@ def main():
         # print(f"Current Batch: {i+1}")
         x_train, y_train = batcher.sample_batch(batch_size=16, seq_len=seq_len)
         lr_curr = lr_schedule(step=i, total_steps=final_end_batch, peak_lr=peak_lr)
-        tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=lr_curr, batch_size=16, verbose=-1, y_ohe=False)
+        tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=lr_curr, batch_size=16, verbose=-1, ohe_y=True)
         curr_accuracy = tinychat_model.get_current_accuracy()
         raw_loss = tinychat_model.get_current_loss()
         if ema_loss is None:

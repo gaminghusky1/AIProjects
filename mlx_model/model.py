@@ -26,32 +26,32 @@ class Model:
         self.curr_loss = 0
         self.curr_accuracy = 0
 
-    def compile(self, loss='mse', optimizer=None):
+    def compile(self, loss='mse', optimizer=None, optimizer_kwargs=None):
         self.loss_func_name = loss
         self.loss_func = loss_functions.LossFunction(loss)
-        self.optimizer = optimizers.optimizer_dict[optimizer]() if optimizer is not None else None
+        self.optimizer = optimizers.optimizer_dict[optimizer](**(optimizer_kwargs or {}))
         last_layer_shape = self.input_shape
         for layer in self.layers:
             layer.init_weights(last_layer_shape)
             last_layer_shape = layer.get_output_shape()
         self.compiled = True
 
-    def forward_propagate(self, inputs, batch_size):
+    def forward_propagate(self, inputs):
         z_outputs = []
         a_outputs = [inputs]
         for layer in self.layers:
-            a_output, z_output = layer.forward_pass(a_outputs[-1], batch_size)
+            a_output, z_output = layer.forward_pass(a_outputs[-1])
             a_outputs.append(a_output)
             z_outputs.append(z_output)
 
         return a_outputs, z_outputs
 
-    def backward_propagate(self, a_outputs, z_outputs, y, batch_size):
+    def backward_propagate(self, a_outputs, z_outputs, y):
         dc_da = self.loss_func.derivative(y, a_outputs[-1])
         for i in reversed(range(len(self.layers))):
-            dc_da = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da, batch_size)
+            dc_da = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da)
 
-    def fit(self, x, y, epochs, learning_rate=0.01, lr_function=default_lr_function, curr_step=0, batch_size=1, ema_beta=0.99, shuffle=True, verbose=1, y_ohe=True, save_after_num_epochs=-1, model_save_path="model", save_metrics=False):
+    def fit(self, x, y, epochs, learning_rate=0.01, lr_function=default_lr_function, augmentation_function=None, curr_step=0, batch_size=1, ema_beta=0.99, shuffle=True, verbose=1, ohe_y=False, previously_trained_epochs=0, save_after_num_epochs=-1, model_save_path="model", save_metrics=False):
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
@@ -68,7 +68,7 @@ class Model:
                 self.metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
 
         data_len = len(x)
-        for i in range(epochs):
+        for i in range(previously_trained_epochs, epochs):
             if shuffle:
                 indices = mx.arange(data_len)
                 indices = mx.random.permutation(indices)
@@ -80,29 +80,30 @@ class Model:
             idx = 0
             while idx < data_len:
                 curr_batch_size = min(batch_size, data_len - idx)
-                x_batch = mx.array(x[idx:idx + curr_batch_size])
-                y_batch = mx.array(y[idx:idx + curr_batch_size])
+                # x_batch = mx.array(x[idx:idx + curr_batch_size])
+                # y_batch = mx.array(y[idx:idx + curr_batch_size])
+                x_batch = x[idx:idx + curr_batch_size]
+                y_batch = y[idx:idx + curr_batch_size]
 
-                if not y_ohe:
+                if augmentation_function is not None:
+                    x_batch = mx.stack([augmentation_function(x_batch[i]) for i in range(x_batch.shape[0])], axis=0)
+
+                if ohe_y:
                     y_batch = to_ohe(y_batch, self.layers[-1].get_output_shape()[-1])
 
-                a_outputs, z_outputs = self.forward_propagate(x_batch, curr_batch_size)
-                batch_loss_sum = mx.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size
+                a_outputs, z_outputs = self.forward_propagate(x_batch)
+                batch_loss_sum = self.loss_func(y_batch, a_outputs[-1]) * curr_batch_size
                 batch_num_correct = mx.mean(mx.argmax(a_outputs[-1], axis=-1) == mx.argmax(y_batch, axis=-1)) * curr_batch_size
 
-                self.backward_propagate(a_outputs, z_outputs, y_batch, curr_batch_size)
+                self.backward_propagate(a_outputs, z_outputs, y_batch)
 
-                if self.optimizer is not None:
-                    self.optimizer.learning_rate = learning_rate * lr_function(curr_step)
-                    param_refs = []
-                    grads = []
-                    for layer in self.layers:
-                        param_refs.extend(layer.get_param_refs())
-                        grads.extend(layer.get_grads())
-                    self.optimizer.step(param_refs, grads)
-                else:
-                    for layer in self.layers:
-                        layer.update_weights_and_biases(learning_rate * lr_function(curr_step), curr_batch_size)
+                self.optimizer.learning_rate = learning_rate * lr_function(curr_step)
+                param_refs = []
+                grads = []
+                for layer in self.layers:
+                    param_refs.extend(layer.get_param_refs())
+                    grads.extend(layer.get_grads())
+                self.optimizer.step(param_refs, grads)
 
                 for layer in self.layers:
                     layer.reset_grads()
@@ -141,15 +142,23 @@ class Model:
             y_hat = layer.get_output(y_hat)
         return y_hat
 
-    def test(self, x, y, y_ohe=True):
+    def test(self, x, y, ohe_y=False):
         data_len = len(x)
         y_hat = x
         for layer in self.layers:
             y_hat = layer.get_output(y_hat, data_len)
-        if not y_ohe:
+        if ohe_y:
             y = to_ohe(y, y_hat.shape[-1])
-        num_correct = mx.mean(mx.argmax(y_hat, axis=-1) == mx.argmax(y, axis=-1)).item() * data_len
-        return num_correct / data_len
+        return mx.mean(mx.argmax(y_hat, axis=-1) == mx.argmax(y, axis=-1)).item()
+
+    def test_loss(self, x, y, ohe_y=False):
+        data_len = len(x)
+        y_hat = x
+        for layer in self.layers:
+            y_hat = layer.get_output(y_hat, data_len)
+        if ohe_y:
+            y = to_ohe(y, y_hat.shape[-1])
+        return self.loss_func(y, y_hat).item()
 
     def get_param_count(self):
         if not self.compiled:

@@ -48,16 +48,13 @@ class Template:
     def init_weights(self, last_layer_shape):
         pass
 
-    def get_output(self, prev_layer_activations, batch_size=1):
+    def get_output(self, prev_layer_activations):
         pass
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         pass
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
-        pass
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         pass
 
     def reset_grads(self):
@@ -83,18 +80,16 @@ class Flatten:
     def init_weights(self, last_layer_shape):
         self.output_shape = (math.prod(last_layer_shape),)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
+        batch_size = prev_layer_activations.shape[0]
         return mx.reshape(prev_layer_activations, (batch_size, -1)), None
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         return mx.reshape(dc_da, prev_layer_activations.shape)
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        pass
 
     def reset_grads(self):
         pass
@@ -118,18 +113,16 @@ class Reshape:
     def init_weights(self, last_layer_shape):
         pass
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
+        batch_size = prev_layer_activations.shape[0]
         return mx.reshape(prev_layer_activations, (batch_size, *self.output_shape)), None
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         return mx.reshape(dc_da, prev_layer_activations.shape)
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        pass
 
     def reset_grads(self):
         pass
@@ -155,18 +148,15 @@ class Dropout:
     def init_weights(self, last_layer_shape):
         self.output_shape = last_layer_shape
 
-    def get_output(self, prev_layer_activations, batch_size=1):
+    def get_output(self, prev_layer_activations):
         return prev_layer_activations
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         mask = (mx.random.uniform(shape=prev_layer_activations.shape) < (1 - self.dropout_rate)).astype(mx.float32)
         return prev_layer_activations * mask * self.scale, mask
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         return dc_da * curr_layer_z * self.scale
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        pass
 
     def reset_grads(self):
         pass
@@ -205,18 +195,18 @@ class Dense:
 
         mx.eval(self.weights, self.biases, self.weights_gradient, self.biases_gradient)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         # prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, -1))
         z_output = mx.matmul(prev_layer_activations, self.weights) + self.biases
         a_output = self.activation(z_output)
 
         return a_output, z_output
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         # prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, -1))
         # curr_layer_z = mx.reshape(curr_layer_z, (batch_size, -1))
         # dc_da = mx.reshape(dc_da, (batch_size, -1))
@@ -234,12 +224,6 @@ class Dense:
         # Cost of previous layer activations
         # dc_d(a_L-1); dz_da-1 = self.weights
         return mx.matmul(dc_dz, self.weights.T)
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights = self.weights - learning_rate * self.weights_gradient
-        self.biases = self.biases - learning_rate * self.biases_gradient
-
-        mx.eval(self.weights, self.biases)
 
     def reset_grads(self):
         self.weights_gradient = mx.zeros_like(self.weights)
@@ -297,19 +281,19 @@ class Convolution:
 
         mx.eval(self.weights, self.biases, self.weights_gradient, self.biases_gradient)
 
-    def get_windows(self, prev_layer_activations, batch_size):
+    def get_windows(self, prev_layer_activations):
         # prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, *self.input_shape))
         padded_input = mx.pad(prev_layer_activations, [(0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)], mode='constant', constant_values=0)
         windows = sliding_window_view(padded_input, window_shape=self.kernel_shape, axis=(2, 3))
         # batch, input_channel, window_h, window_w, kernel_h, kernel_w
         return windows[:, :, ::self.stride, ::self.stride, :, :], padded_input.shape
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
-        windows, padded_input_shape = self.get_windows(prev_layer_activations, batch_size)
+    def forward_pass(self, prev_layer_activations):
+        windows, padded_input_shape = self.get_windows(prev_layer_activations)
 
         # weights are (output_channel, input_channel, kernel_h, kernel_w)
         # for each singular output, patches of shape (input_channel, kernel_h, kernel_w) from the input are elementwise
@@ -320,7 +304,7 @@ class Convolution:
         a_output = self.activation(z_output)
         return a_output, (z_output, windows, padded_input_shape)
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         z_output, windows, padded_input_shape = curr_layer_z
         # dc_da = mx.reshape(dc_da, (batch_size, *self.output_shape))
         da_dz = self.activation.derivative(z_output)
@@ -341,12 +325,6 @@ class Convolution:
                 dc_da_prev[:, :, i * self.stride:i * self.stride + self.kernel_shape[0], j * self.stride:j * self.stride + self.kernel_shape[1]] += mx.einsum('bo,ochw->bchw', dc_dz[:, :, i, j], self.weights)
 
         return dc_da_prev[:, :, self.padding:-self.padding, self.padding:-self.padding] if self.padding != 0 else dc_da_prev
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights -= learning_rate * self.weights_gradient
-        self.biases -= learning_rate * self.biases_gradient
-
-        mx.eval(self.weights, self.biases)
 
     def reset_grads(self):
         self.weights_gradient = mx.zeros_like(self.weights)
@@ -383,11 +361,11 @@ class MaxPooling:
         self.output_shape = (self.input_shape[0], (self.input_shape[1] - self.pool_size[0] + 2 * self.padding) // self.stride + 1, (self.input_shape[2] - self.pool_size[1] + 2 * self.padding) // self.stride + 1)
         self.output_size = math.prod(self.output_shape)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         # prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, *self.input_shape))
         prev_layer_activations = mx.pad(prev_layer_activations, [(0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)], mode='constant', constant_values=0)
         # a_output = np.zeros(self.output_shape)
@@ -405,7 +383,7 @@ class MaxPooling:
         #             max_indices[c, i, j] = np.argmax(prev_layer_activations_window)
         return a_output, windows
 
-    def backward_pass(self, prev_layer_activations, windows, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, windows, dc_da):
         # prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, *self.input_shape))
         # dc_da = dc_da.reshape(self.output_shape)
         # prev_layer_activations = np.pad(prev_layer_activations, ((0, 0), (self.padding, self.padding), (self.padding, self.padding)), mode='constant', constant_values=0)
@@ -429,8 +407,40 @@ class MaxPooling:
                 prev_dc_da[:, :, i_start:i_start + self.pool_size[0], j_start:j_start + self.pool_size[1]] += max_areas_scaled[:, :, i, j, :, :]
         return prev_dc_da
 
-    def update_weights_and_biases(self, learning_rate, batch_size):
+    def reset_grads(self):
         pass
+
+    def get_param_refs(self):
+        return []
+
+    def get_grads(self):
+        return []
+
+    def get_param_count(self):
+        return 0
+
+    def get_output_shape(self):
+        return self.output_shape
+
+class GlobalAveragePooling:
+    def __init__(self):
+        self.output_shape = None
+
+    def init_weights(self, last_layer_shape):
+        self.output_shape = (last_layer_shape[0],)
+
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations):
+        output = mx.mean(prev_layer_activations, axis=(2, 3))
+        return output, None
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
+        b, c, h, w = prev_layer_activations.shape
+        prev_dc_da = mx.full(prev_layer_activations.shape, 1 / (h * w)) * dc_da[..., mx.newaxis, mx.newaxis]
+        return prev_dc_da
 
     def reset_grads(self):
         pass
@@ -462,27 +472,23 @@ class TokenEmbedding:
 
         mx.eval(self.weights, self.weights_gradient)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
+        batch_size = prev_layer_activations.shape[0]
         prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, -1))
         a_output = self.weights[prev_layer_activations]
 
         return a_output, None
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         dc_da = mx.reshape(dc_da, (-1, self.embedding_size))
 
         self.weights_gradient = self.weights_gradient.at[mx.flatten(prev_layer_activations)].add(dc_da)
 
         return None
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights = self.weights - learning_rate * self.weights_gradient
-
-        mx.eval(self.weights)
 
     def reset_grads(self):
         self.weights_gradient = mx.zeros_like(self.weights)
@@ -517,26 +523,21 @@ class PositionalEmbedding:
 
         mx.eval(self.weights, self.weights_gradient)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         sequence_len = prev_layer_activations.shape[1]
         a_output = prev_layer_activations + self.weights[:sequence_len]
 
         return a_output, None
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         sequence_len = prev_layer_activations.shape[1]
         self.weights_gradient[:sequence_len] += mx.sum(dc_da, axis=0)
 
         return dc_da
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights = self.weights - learning_rate * self.weights_gradient
-
-        mx.eval(self.weights)
 
     def reset_grads(self):
         self.weights_gradient = mx.zeros_like(self.weights)
@@ -566,19 +567,19 @@ class LayerNorm:
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
-        self.scale = mx.ones(self.input_shape[1])
-        self.shift = mx.zeros(self.input_shape[1])
+        self.scale = mx.ones(self.input_shape[-1])
+        self.shift = mx.zeros(self.input_shape[-1])
 
         self.scale_gradient = mx.zeros_like(self.scale)
         self.shift_gradient = mx.zeros_like(self.shift)
 
         mx.eval(self.scale, self.shift, self.scale_gradient, self.shift_gradient)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         numerator_term = prev_layer_activations - mx.mean(prev_layer_activations, axis=-1, keepdims=True)
         denominator_term = mx.sqrt(mx.var(prev_layer_activations, axis=-1, keepdims=True) + self.epsilon)
 
@@ -588,7 +589,7 @@ class LayerNorm:
 
         return a_output, (x_hat, denominator_term)
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         x_hat, denominator_term = curr_layer_z
 
         self.scale_gradient = self.scale_gradient + mx.sum(dc_da * x_hat, axis=tuple(range(dc_da.ndim - 1)))
@@ -598,12 +599,6 @@ class LayerNorm:
 
         dc_dprev_layer_activations = (g - g.mean(axis=-1, keepdims=True) - x_hat * mx.mean(g * x_hat, axis=-1, keepdims=True)) / denominator_term
         return dc_dprev_layer_activations
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.scale = self.scale - learning_rate * self.scale_gradient
-        self.shift = self.shift - learning_rate * self.shift_gradient
-
-        mx.eval(self.scale, self.shift)
 
     def reset_grads(self):
         self.scale_gradient = mx.zeros_like(self.scale)
@@ -619,6 +614,58 @@ class LayerNorm:
 
     def get_param_count(self):
         return math.prod(self.scale.shape) + math.prod(self.shift.shape)
+
+    def get_output_shape(self):
+        return self.input_shape
+
+class RMSNorm:
+    def __init__(self, epsilon=1e-5):
+        self.epsilon = epsilon
+        self.scale = None
+        self.scale_gradient = None
+        self.input_shape = None
+
+    def init_weights(self, last_layer_shape):
+        self.input_shape = last_layer_shape
+        self.scale = mx.ones(self.input_shape[-1])
+        self.scale_gradient = mx.zeros_like(self.scale)
+
+        mx.eval(self.scale, self.scale_gradient)
+
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations):
+        rms = mx.sqrt(mx.mean(prev_layer_activations * prev_layer_activations, axis=-1, keepdims=True) + self.epsilon)
+        x_hat = prev_layer_activations / rms
+        a_output = self.scale * x_hat
+
+        return a_output, (x_hat, rms)
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
+        x_hat, rms = curr_layer_z
+
+        self.scale_gradient = self.scale_gradient + mx.sum(dc_da * x_hat, axis=tuple(range(dc_da.ndim - 1)))
+
+        g = dc_da * self.scale
+
+        dc_dprev_layer_activations = (g - x_hat * mx.mean(g * x_hat, axis=-1, keepdims=True)) / rms
+        return dc_dprev_layer_activations
+
+    def reset_grads(self):
+        self.scale_gradient = mx.zeros_like(self.scale)
+
+        mx.eval(self.scale_gradient)
+
+    def get_param_refs(self):
+        return [(self, "scale")]
+
+    def get_grads(self):
+        return [self.scale_gradient]
+
+    def get_param_count(self):
+        return math.prod(self.scale.shape)
 
     def get_output_shape(self):
         return self.input_shape
@@ -665,11 +712,12 @@ class Attention:
 
         mx.eval(self.w_q, self.w_k, self.w_v, self.w_o, self.b_o, self.w_q_gradient, self.w_k_gradient, self.w_v_gradient, self.w_o_gradient, self.b_o_gradient)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
+        batch_size = prev_layer_activations.shape[0]
         sequence_len = prev_layer_activations.shape[1]
         # t and s are both sequence_length, this is just to distinguish the q dimension and the k dimension for einsum.
         q = mx.einsum('ik,bti->btk', self.w_q, prev_layer_activations)
@@ -705,7 +753,8 @@ class Attention:
 
         return a_output, (raw_scores, attention_scores, q, k, v, z_output)
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
+        batch_size = prev_layer_activations.shape[0]
         raw_scores, attention_scores, q, k, v, z_output = curr_layer_z
         sequence_len = prev_layer_activations.shape[1]
 
@@ -743,16 +792,6 @@ class Attention:
 
         dc_dprev_layer_activations = mx.einsum('btk,ik->bti', dc_dq, self.w_q) + mx.einsum('bsk,ik->bsi', dc_dk, self.w_k) + mx.einsum('bsv,iv->bsi', dc_dv, self.w_v)
         return dc_dprev_layer_activations
-
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.w_q = self.w_q - learning_rate * self.w_q_gradient
-        self.w_k = self.w_k - learning_rate * self.w_k_gradient
-        self.w_v = self.w_v - learning_rate * self.w_v_gradient
-        self.w_o = self.w_o - learning_rate * self.w_o_gradient
-        self.b_o = self.b_o - learning_rate * self.b_o_gradient
-
-        mx.eval(self.w_q, self.w_k, self.w_v, self.w_o, self.b_o)
 
     def reset_grads(self):
         self.w_q_gradient = mx.zeros_like(self.w_q)
@@ -808,11 +847,11 @@ class MultilayerPerceptron:
 
         mx.eval(self.up_weights, self.up_biases, self.down_weights, self.down_biases, self.up_weights_gradient, self.up_biases_gradient, self.down_weights_gradient, self.down_biases_gradient)
 
-    def get_ouptut(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_ouptut(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         raw_ff = mx.einsum('fi,bsi->bsf', self.up_weights, prev_layer_activations)
         raw_ff = raw_ff + self.up_biases
 
@@ -823,7 +862,7 @@ class MultilayerPerceptron:
 
         return a_output, (raw_ff, activated_ff)
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         raw_ff, activated_ff = curr_layer_z
 
         self.down_weights_gradient = self.down_weights_gradient + mx.einsum('bsi,bsf->if', dc_da, activated_ff)
@@ -838,15 +877,6 @@ class MultilayerPerceptron:
         # dc_da += np.einsum('fi,bsf->bsi', self.up_weights, dc_draw_ff)
         dc_dprev_layer_activations = mx.einsum('fi,bsf->bsi', self.up_weights, dc_draw_ff)
         return dc_dprev_layer_activations
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.up_weights = self.up_weights - learning_rate * self.up_weights_gradient
-        self.up_biases = self.up_biases - learning_rate * self.up_biases_gradient
-
-        self.down_weights = self.down_weights - learning_rate * self.down_weights_gradient
-        self.down_biases = self.down_biases - learning_rate * self.down_biases_gradient
-
-        mx.eval(self.up_weights, self.up_biases, self.down_weights, self.down_biases)
 
     def reset_grads(self):
         self.up_weights_gradient = mx.zeros_like(self.up_weights)
@@ -879,30 +909,26 @@ class ResidualBlock:
             last_layer_shape = layer.get_output_shape()
         self.output_shape = last_layer_shape
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_outputs = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_outputs = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         a_outputs = [prev_layer_activations]
         z_outputs = []
         for layer in self.layers:
-            a_output, z_output = layer.forward_pass(a_outputs[-1], batch_size)
+            a_output, z_output = layer.forward_pass(a_outputs[-1])
             a_outputs.append(a_output)
             z_outputs.append(z_output)
         a_outputs[-1] += prev_layer_activations
         return a_outputs[-1], (a_outputs, z_outputs)
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         a_outputs, z_outputs = curr_layer_z
         dc_da_curr = dc_da
         for i in reversed(range(len(self.layers))):
-            dc_da_curr = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da_curr, batch_size)
+            dc_da_curr = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da_curr)
         return dc_da_curr + dc_da
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        for layer in self.layers:
-            layer.update_weights_and_biases(learning_rate, batch_size)
 
     def reset_grads(self):
         for layer in self.layers:
@@ -955,11 +981,11 @@ class TimeDistributedDense:
 
         mx.eval(self.weights, self.biases, self.weights_gradient, self.biases_gradient)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def forward_pass(self, prev_layer_activations, batch_size):
+    def forward_pass(self, prev_layer_activations):
         z_output = mx.einsum('oi,bsi->bso', self.weights, prev_layer_activations)
         z_output = z_output + self.biases
 
@@ -967,7 +993,7 @@ class TimeDistributedDense:
 
         return a_output, z_output
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         if self.activation.elementwise:
             dc_dz = dc_da * self.activation.derivative(curr_layer_z)
         else:
@@ -978,12 +1004,6 @@ class TimeDistributedDense:
 
         dc_dprev_layer_activations = mx.einsum('oi,bso->bsi', self.weights, dc_dz)
         return dc_dprev_layer_activations
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights = self.weights - learning_rate * self.weights_gradient
-        self.biases = self.biases - learning_rate * self.biases_gradient
-
-        mx.eval(self.weights, self.biases)
 
     def reset_grads(self):
         self.weights_gradient = mx.zeros_like(self.weights)
@@ -999,6 +1019,55 @@ class TimeDistributedDense:
 
     def get_param_count(self):
         return math.prod(self.weights.shape) + math.prod(self.biases.shape)
+
+    def get_output_shape(self):
+        return self.output_shape
+
+class TiedTimeDistributedDense:
+    def __init__(self, embedding_layer, activation='linear'):
+        self.activation_name = activation
+        self.activation = activations.Activation(activation)
+
+        self.embedding_layer = embedding_layer
+
+        self.output_shape = None
+
+    def init_weights(self, last_layer_shape):
+        self.output_shape = (last_layer_shape[0], self.embedding_layer.weights.shape[0])
+
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations):
+        z_output = mx.einsum('oi,bsi->bso', self.embedding_layer.weights, prev_layer_activations)
+
+        a_output = self.activation(z_output)
+
+        return a_output, z_output
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
+        if self.activation.elementwise:
+            dc_dz = dc_da * self.activation.derivative(curr_layer_z)
+        else:
+            dc_dz = mx.einsum('bsi,bsij->bsj', dc_da, self.activation.derivative(curr_layer_z))
+
+        self.embedding_layer.weights_gradient = self.embedding_layer.weights_gradient + mx.einsum('bso,bsi->oi', dc_dz, prev_layer_activations)
+
+        dc_dprev_layer_activations = mx.einsum('oi,bso->bsi', self.embedding_layer.weights, dc_dz)
+        return dc_dprev_layer_activations
+
+    def reset_grads(self):
+        pass
+
+    def get_param_refs(self):
+        return []
+
+    def get_grads(self):
+        return []
+
+    def get_param_count(self):
+        return 0
 
     def get_output_shape(self):
         return self.output_shape
@@ -1055,11 +1124,12 @@ class OldConvolution:
         self.precompute_dz_da()
         mx.eval(self.weights, self.biases, self.weights_gradient, self.biases_gradient, self.dz_da)
 
-    def get_output(self, prev_layer_activations, batch_size=1):
-        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+    def get_output(self, prev_layer_activations):
+        a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
-    def get_windows(self, prev_layer_activations, batch_size):
+    def get_windows(self, prev_layer_activations):
+        batch_size = prev_layer_activations.shape[0]
         prev_layer_activations = mx.reshape(prev_layer_activations, (batch_size, *self.input_shape))
         prev_layer_activations = mx.pad(prev_layer_activations, [(0, 0), (0, 0), (self.padding, self.padding), (self.padding, self.padding)], mode='constant', constant_values=0)
         windows = sliding_window_view(prev_layer_activations, window_shape=self.kernel_shape, axis=(2, 3))
@@ -1067,8 +1137,9 @@ class OldConvolution:
         windows = mx.reshape(windows, (batch_size, self.output_size, self.kernel_stack_size))
         return windows
 
-    def forward_pass(self, prev_layer_activations, batch_size):
-        windows = self.get_windows(prev_layer_activations, batch_size)
+    def forward_pass(self, prev_layer_activations):
+        batch_size = prev_layer_activations.shape[0]
+        windows = self.get_windows(prev_layer_activations)
         flattened_weights = mx.reshape(self.weights, (self.num_filters, self.kernel_stack_size))
         z_output = mx.einsum('bok,fk->bfo', windows, flattened_weights)
         z_output = mx.reshape(z_output, (batch_size, self.num_filters, *self.output_shape))
@@ -1085,7 +1156,8 @@ class OldConvolution:
         a_output = self.activation(z_output)
         return a_output, z_output
 
-    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
+        batch_size = prev_layer_activations.shape[0]
         curr_layer_z = mx.reshape(curr_layer_z, (batch_size, self.num_filters, self.output_size))
         dc_da = mx.reshape(dc_da, (batch_size, self.num_filters, self.output_size))
         da_dz = self.activation.derivative(curr_layer_z)
@@ -1094,7 +1166,7 @@ class OldConvolution:
         else:
             dc_dz = mx.einsum('bfi,bfij->bfj', dc_da, da_dz)
 
-        windows = self.get_windows(prev_layer_activations, batch_size)
+        windows = self.get_windows(prev_layer_activations)
         # dz_dw = np.zeros((*self.stacked_output_shape, *self.kernel_stack_shape))
         # for f in range(self.num_filters):
         #     for i in range(self.output_shape[0]):
@@ -1110,12 +1182,6 @@ class OldConvolution:
         self.biases_gradient = self.biases_gradient + mx.sum(dc_dz, axis=(0, 2))
         dc_da = mx.einsum('bfo,foi->bi', dc_dz, self.dz_da)
         return dc_da
-
-    def update_weights_and_biases(self, learning_rate, batch_size):
-        self.weights = self.weights - learning_rate * self.weights_gradient
-        self.biases = self.biases - learning_rate * self.biases_gradient
-
-        mx.eval(self.weights, self.biases)
 
     def reset_grads(self):
         self.weights_gradient = mx.zeros_like(self.weights)

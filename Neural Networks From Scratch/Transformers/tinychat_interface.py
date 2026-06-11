@@ -1,3 +1,5 @@
+import time
+
 import sentencepiece as spm
 from mlx_model import *
 import mlx.core as mx

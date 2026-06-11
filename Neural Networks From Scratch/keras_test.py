@@ -35,13 +35,13 @@ def main():
 
     keras_model = keras.Sequential([
         keras.layers.Input((28, 28, 1)),
-        keras.layers.Conv2D(32, (3, 3), activation="relu"),
-        keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2)),
-        keras.layers.Conv2D(64, (3, 3), activation="relu"),
+        # keras.layers.Conv2D(32, (3, 3), activation="relu"),
+        # keras.layers.MaxPooling2D(pool_size=(2, 2), strides=(2, 2)),
+        # keras.layers.Conv2D(64, (3, 3), activation="relu"),
         keras.layers.Flatten(),
         # keras.layers.Dense(1024, activation="relu"),
-        # keras.layers.Dense(512, activation="relu"),
-        # keras.layers.Dense(256, activation="relu"),
+        keras.layers.Dense(512, activation="relu"),
+        keras.layers.Dense(256, activation="relu"),
         keras.layers.Dense(128, activation="relu"),
         # keras.layers.Dense(64, activation="relu"),
         keras.layers.Dense(10, activation="softmax")

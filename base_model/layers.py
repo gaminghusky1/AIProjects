@@ -396,6 +396,44 @@ class MaxPooling:
     def get_output_shape(self):
         return self.output_shape
 
+class GlobalAveragePooling:
+    def __init__(self):
+        self.output_shape = None
+
+    def init_weights(self, last_layer_shape):
+        self.output_shape = (last_layer_shape[0],)
+
+    def get_output(self, prev_layer_activations, batch_size=1):
+        a_output, z_output = self.forward_pass(prev_layer_activations, batch_size)
+        return a_output
+
+    def forward_pass(self, prev_layer_activations, batch_size):
+        output = np.mean(prev_layer_activations, axis=(2, 3))
+        return output, None
+
+    def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da, batch_size):
+        b, c, h, w = prev_layer_activations.shape
+        prev_dc_da = np.full(prev_layer_activations.shape, 1 / (h * w)) * dc_da[..., mx.newaxis, mx.newaxis]
+        return prev_dc_da
+
+    def update_weights_and_biases(self, learning_rate, batch_size):
+        pass
+
+    def reset_grads(self):
+        pass
+
+    def get_params(self):
+        return []
+
+    def get_grads(self):
+        return []
+
+    def get_param_count(self):
+        return 0
+
+    def get_output_shape(self):
+        return self.output_shape
+
 class TokenEmbedding:
     def __init__(self, vocab_size, embedding_size):
         self.vocab_size = vocab_size
@@ -503,8 +541,8 @@ class LayerNorm:
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
-        self.scale = np.ones(self.input_shape[1])
-        self.shift = np.zeros(self.input_shape[1])
+        self.scale = np.ones(self.input_shape[-1])
+        self.shift = np.zeros(self.input_shape[-1])
 
         self.scale_gradient = np.zeros_like(self.scale)
         self.shift_gradient = np.zeros_like(self.shift)

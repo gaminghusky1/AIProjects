@@ -51,7 +51,7 @@ class Model:
         for i in reversed(range(len(self.layers))):
             dc_da = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da, batch_size)
 
-    def fit(self, x, y, epochs, learning_rate=0.01, lr_function=default_lr_function, curr_step=0, batch_size=1, ema_beta=0.99, shuffle=True, verbose=1, y_ohe=True, save_after_num_epochs=-1, model_save_path="model", save_metrics=False):
+    def fit(self, x, y, epochs, learning_rate=0.01, lr_function=default_lr_function, augmentation_function=None, curr_step=0, batch_size=1, ema_beta=0.99, shuffle=True, verbose=1, y_ohe=True, previously_trained_epochs=0, save_after_num_epochs=-1, model_save_path="model", save_metrics=False):
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
@@ -68,7 +68,7 @@ class Model:
                 self.metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
 
         data_len = len(x)
-        for i in range(epochs):
+        for i in range(previously_trained_epochs, epochs):
             if shuffle:
                 indices = np.arange(data_len)
                 np.random.shuffle(indices)
@@ -83,11 +83,14 @@ class Model:
                 x_batch = np.array(x[idx:idx + curr_batch_size])
                 y_batch = np.array(y[idx:idx + curr_batch_size])
 
+                if augmentation_function is not None:
+                    x_batch = np.stack([augmentation_function(x_batch[i]) for i in range(x_batch.shape[0])], axis=0)
+
                 if not y_ohe:
                     y_batch = to_ohe(y_batch, self.layers[-1].get_output_shape()[-1])
 
                 a_outputs, z_outputs = self.forward_propagate(x_batch, curr_batch_size)
-                batch_loss_sum = np.sum(self.loss_func(y_batch, a_outputs[-1])) * curr_batch_size
+                batch_loss_sum = self.loss_func(y_batch, a_outputs[-1]) * curr_batch_size
                 batch_num_correct = np.mean(np.argmax(a_outputs[-1], axis=-1) == np.argmax(y_batch, axis=-1)) * curr_batch_size
 
                 self.backward_propagate(a_outputs, z_outputs, y_batch, curr_batch_size)
@@ -146,8 +149,16 @@ class Model:
             y_hat = layer.get_output(y_hat, data_len)
         if not y_ohe:
             y = to_ohe(y, y_hat.shape[-1])
-        num_correct = np.mean(np.argmax(y_hat, axis=-1) == np.argmax(y, axis=-1)) * data_len
-        return num_correct / data_len
+        return np.mean(np.argmax(y_hat, axis=-1) == np.argmax(y, axis=-1))
+
+    def test_loss(self, x, y, y_ohe=True):
+        data_len = len(x)
+        y_hat = x
+        for layer in self.layers:
+            y_hat = layer.get_output(y_hat, data_len)
+        if not y_ohe:
+            y = to_ohe(y, y_hat.shape[-1])
+        return self.loss_func(y, y_hat)
 
     def get_param_count(self):
         param_count = 0

@@ -2,11 +2,11 @@ import sys
 import pygame
 import mlx.core as mx
 import numpy as np
-from keras.datasets import cifar10
+from keras.datasets import cifar100
 from mlx_model import *
 
-def load_cifar10():
-    (x_train, y_train), (x_test, y_test) = cifar10.load_data()
+def load_cifar100():
+    (x_train, y_train), (x_test, y_test) = cifar100.load_data()
     # x_train = mx.array(x_train)
     # y_train = mx.array(y_train)
     # x_test = mx.array(x_test)
@@ -46,6 +46,27 @@ def get_image_surface(img, scale=1):
 
     return surface
 
+def get_smooth_image_surface(img, scale=1):
+    # Ensure shape is (H, W, C)
+    if img.shape == (3, 32, 32):  # CIFAR format
+        img = np.transpose(img, (1, 2, 0))
+
+    # Ensure uint8
+    if img.dtype != np.uint8:
+        img = (img * 255).clip(0, 255).astype(np.uint8)
+
+    # Create surface
+    surface = pygame.surfarray.make_surface(img)
+
+    # Scale if needed
+    if scale != 1:
+        surface = pygame.transform.smoothscale(
+            surface,
+            (img.shape[1] * scale, img.shape[0] * scale)
+        )
+
+    return surface
+
 
 def main():
     # Colors
@@ -60,14 +81,16 @@ def main():
     aqua = (5, 195, 221)
     red = (255, 0, 0)
 
-    x_train, y_train, x_test, y_test = load_cifar10()
+    x_train, y_train, x_test, y_test = load_cifar100()
 
     pygame.init()
     pygame.event.set_allowed([pygame.KEYDOWN, pygame.QUIT, pygame.KEYUP, pygame.MOUSEBUTTONDOWN])
 
-    scale = 30
+    monitor_width = pygame.display.get_desktop_sizes()[0][0]
+    scale = monitor_width // 80 - 2
+    # scale = 30
 
-    screen = pygame.display.set_mode((48 * scale, 32 * scale))
+    screen = pygame.display.set_mode((80 * scale, 32 * scale))
     pygame.display.set_caption('CIFAR')
 
     font = pygame.font.SysFont('Arial', 48)
@@ -81,37 +104,133 @@ def main():
     curr_y = y_train
 
     ordered_labels = [
-        "airplane",
-        "automobile",
-        "bird",
-        "cat",
-        "deer",
-        "dog",
-        "frog",
-        "horse",
-        "ship",
-        "truck"
+        "apple",
+        "aquarium_fish",
+        "baby",
+        "bear",
+        "beaver",
+        "bed",
+        "bee",
+        "beetle",
+        "bicycle",
+        "bottle",
+        "bowl",
+        "boy",
+        "bridge",
+        "bus",
+        "butterfly",
+        "camel",
+        "can",
+        "castle",
+        "caterpillar",
+        "cattle",
+        "chair",
+        "chimpanzee",
+        "clock",
+        "cloud",
+        "cockroach",
+        "couch",
+        "crab",
+        "crocodile",
+        "cup",
+        "dinosaur",
+        "dolphin",
+        "elephant",
+        "flatfish",
+        "forest",
+        "fox",
+        "girl",
+        "hamster",
+        "house",
+        "kangaroo",
+        "keyboard",
+        "lamp",
+        "lawn_mower",
+        "leopard",
+        "lion",
+        "lizard",
+        "lobster",
+        "man",
+        "maple_tree",
+        "motorcycle",
+        "mountain",
+        "mouse",
+        "mushroom",
+        "oak_tree",
+        "orange",
+        "orchid",
+        "otter",
+        "palm_tree",
+        "pear",
+        "pickup_truck",
+        "pine_tree",
+        "plain",
+        "plate",
+        "poppy",
+        "porcupine",
+        "possum",
+        "rabbit",
+        "raccoon",
+        "ray",
+        "road",
+        "rocket",
+        "rose",
+        "sea",
+        "seal",
+        "shark",
+        "shrew",
+        "skunk",
+        "skyscraper",
+        "snail",
+        "snake",
+        "spider",
+        "squirrel",
+        "streetcar",
+        "sunflower",
+        "sweet_pepper",
+        "table",
+        "tank",
+        "telephone",
+        "television",
+        "tiger",
+        "tractor",
+        "train",
+        "trout",
+        "tulip",
+        "turtle",
+        "wardrobe",
+        "whale",
+        "willow_tree",
+        "wolf",
+        "woman",
+        "worm"
     ]
 
-    cifar_model = model.Model.load_from("Models/cifar_conv")
-
+    cifar_model = model.Model.load_from("Models/cifar100_conv_epoch_20")
     # Main Game Loop
     while True:
         screen.fill(black)
 
         screen.blit(get_image_surface(curr_x[img_idx], scale), (0, 0))
+        screen.blit(get_smooth_image_surface(curr_x[img_idx], scale), (48 * scale, 0))
 
         curr_dataset = "train" if curr_x is x_train else "test"
+        curr_dataset += f" ({img_idx + 1} of {len(curr_x)})"
+        curr_dataset += f"; true label: {ordered_labels[curr_y[img_idx]]}"
 
         dataset_surface = small_font.render(curr_dataset, True, white)
         dataset_rect = dataset_surface.get_rect(center=(scale * (32 + (48 - 32) // 2), 1 * scale))
         screen.blit(dataset_surface, dataset_rect)
 
         # Kinda bad b/w numpy and mlx
+        # Convert to mlx.core.array so the model can take it in, also add newaxis for batch dimension
         x = mx.array(curr_x[img_idx][np.newaxis, ...], dtype=mx.float32)
+        # Get model predictions, take [0] to remove batch dimension, * 100 for percentages
         y = np.array(cifar_model.predict(x)[0] * 100)
 
+        # Add integer labels to each prediction percentage
         predictions = np.column_stack((np.arange(len(y)), y))
+        # Sort predictions by percentage
         predictions = predictions[np.argsort(-predictions[:, 1])]
 
         for i in range(len(predictions)):
@@ -135,8 +254,8 @@ def main():
                     curr_x = x_test
                     curr_y = y_test
                     img_idx = 0
-
-            if event.type == pygame.QUIT:
+            elif event.type == pygame.QUIT:
+                pygame.quit()
                 sys.exit()
 
         pygame.display.flip()

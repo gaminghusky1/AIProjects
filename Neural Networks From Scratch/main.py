@@ -90,8 +90,8 @@ def main():
         # layers.Dense(256, activation="relu"),
         layers.Flatten(),
         # layers.Dense(1024, activation="relu"),
-        # layers.Dense(512, activation="relu"),
-        # layers.Dense(256, activation="relu"),
+        layers.Dense(512, activation="relu"),
+        layers.Dense(256, activation="relu"),
         layers.Dense(128, activation="relu"),
         # layers.Dense(64, activation="relu"),
         layers.Dense(10, activation="crossentropy_softmax")
