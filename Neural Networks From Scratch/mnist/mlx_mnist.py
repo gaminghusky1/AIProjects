@@ -54,7 +54,7 @@ def main():
 
     print("Param Count:", mnist_model.get_param_count())
 
-    mnist_model.fit(x_train, y_train_oh, epochs=30, learning_rate=0.001, batch_size=32, verbose=2) #, save_after_num_epochs=30, model_save_path="Models/test", save_metrics=True)
+    mnist_model.fit(x_train, y_train_oh, epochs=30, learning_rate=0.001, batch_size=1000, verbose=1) #, save_after_num_epochs=30, model_save_path="Models/test", save_metrics=True)
     print("Accuracy on test dataset: " + str(mnist_model.test(x_test, y_test_oh)))
 
     # mnist_model.save_as("Models/mnist_model")

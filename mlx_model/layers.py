@@ -40,6 +40,56 @@ def sliding_window_view(x, window_shape, axis):
     windows = mx.transpose(xhw, (0, 1, 2, 4, 3, 5))
     return windows
 
+def rope_forward(q, k, base=10000.0):
+    b, h, t, d = q.shape
+
+    if q.shape != k.shape:
+        raise ValueError("RoPE q and k must have matching shape!")
+    if d % 2 != 0:
+        raise ValueError("RoPE requires even head dimension!")
+
+    half_d = d // 2
+
+    positions = mx.arange(t)[:, mx.newaxis]
+    pair_idx = mx.arange(half_d)[mx.newaxis, :]
+
+    inv_freq = 1.0 / (base ** (2 * pair_idx / d))
+    angles = positions * inv_freq
+
+    cos = mx.cos(angles).astype(q.dtype)[mx.newaxis, mx.newaxis, :, :]
+    sin = mx.sin(angles).astype(q.dtype)[mx.newaxis, mx.newaxis, :, :]
+
+    q_even = q[..., 0::2]
+    q_odd = q[..., 1::2]
+    k_even = k[..., 0::2]
+    k_odd = k[..., 1::2]
+
+    rotated_q_even = q_even * cos - q_odd * sin
+    rotated_q_odd = q_odd * cos + q_even * sin
+    rotated_k_even = k_even * cos - k_odd * sin
+    rotated_k_odd = k_odd * cos + k_even * sin
+
+    rotated_q = mx.reshape(mx.stack([rotated_q_even, rotated_q_odd], axis=-1), q.shape)
+    rotated_k = mx.reshape(mx.stack([rotated_k_even, rotated_k_odd], axis=-1), k.shape)
+
+    return rotated_q, rotated_k, cos, sin
+
+def rope_backward(dyq, dyk, cos, sin):
+    dyq_even = dyq[..., 0::2]
+    dyq_odd = dyq[..., 1::2]
+    dyk_even = dyk[..., 0::2]
+    dyk_odd = dyk[..., 1::2]
+
+    dq_even = dyq_even * cos + dyq_odd * sin
+    dq_odd = dyq_odd * cos - dyq_even * sin
+    dk_even = dyk_even * cos + dyk_odd * sin
+    dk_odd = dyk_odd * cos - dyk_even * sin
+
+    dq = mx.reshape(mx.stack([dq_even, dq_odd], axis=-1), dyq.shape)
+    dk = mx.reshape(mx.stack([dk_even, dk_odd], axis=-1), dyk.shape)
+
+    return dq, dk
+
 # Just a template; not to be actually used
 class Template:
     def __init__(self):
@@ -671,7 +721,7 @@ class RMSNorm:
         return self.input_shape
 
 class Attention:
-    def __init__(self, d_k, d_v, heads=1, mask=None):
+    def __init__(self, d_k, d_v, heads=1, mask=None, use_rope=False):
         self.d_k = d_k
         self.d_v = d_v
         self.heads = heads
@@ -693,6 +743,8 @@ class Attention:
         self.mask = mask
 
         self.input_shape = None
+
+        self.use_rope = use_rope
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
@@ -731,6 +783,12 @@ class Attention:
         k = mx.reshape(k, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
         v = mx.reshape(v, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
 
+        rope_cos = None
+        rope_sin = None
+
+        if self.use_rope:
+            q, k, rope_cos, rope_sin = rope_forward(q, k)
+
         d_head = q.shape[-1]
         scale = 1.0 / math.sqrt(d_head)
         raw_scores = mx.einsum('bhtk,bhsk->bhts', q, k) * scale
@@ -751,11 +809,11 @@ class Attention:
         a_output = mx.einsum('vi,btv->bti', self.w_o, z_output)
         a_output = a_output + self.b_o
 
-        return a_output, (raw_scores, attention_scores, q, k, v, z_output)
+        return a_output, (raw_scores, attention_scores, q, k, v, z_output, rope_cos, rope_sin)
 
     def backward_pass(self, prev_layer_activations, curr_layer_z, dc_da):
         batch_size = prev_layer_activations.shape[0]
-        raw_scores, attention_scores, q, k, v, z_output = curr_layer_z
+        raw_scores, attention_scores, q, k, v, z_output, rope_cos, rope_sin = curr_layer_z
         sequence_len = prev_layer_activations.shape[1]
 
         self.w_o_gradient = self.w_o_gradient + mx.einsum('bsi,bsv->vi', dc_da, z_output)
@@ -769,10 +827,16 @@ class Attention:
         self.w_v_gradient = self.w_v_gradient + mx.einsum('bsv,bsi->iv', dc_dv, prev_layer_activations)
 
         dc_dattention_scores = mx.einsum('bhtv,bhsv->bhts', dc_dz, v)
-        dattention_scores_draw_scores = activations.attention_softmax_derivative(raw_scores)
+        # Since getting dc_draw_score for a given element, say, where b,h,t,s are all 0 (so very first index) is calculated
+        # by multiplying the gradient dc_dattention_scores by the jacobian, it is equivalent to multiplying the very first
+        # element in the gradient by the softmax
+        dc_draw_scores = attention_scores * (dc_dattention_scores - mx.sum(attention_scores * dc_dattention_scores, axis=-1, keepdims=True))
 
-        # j is same as s, but it needs to be a different letter for einsum to do matmul correctly.
-        dc_draw_scores = mx.einsum('bhts,bhtsj->bhtj', dc_dattention_scores, dattention_scores_draw_scores)
+        # This is old softmax derivative that constructed the entire jacobian, the new one is above
+        # dattention_scores_draw_scores = activations.attention_softmax_derivative(raw_scores)
+        #
+        # # j is same as s, but it needs to be a different letter for einsum to do matmul correctly.
+        # dc_draw_scores = mx.einsum('bhts,bhtsj->bhtj', dc_dattention_scores, dattention_scores_draw_scores)
 
         # Apparently because in forward pass the mask is zero the dc_draw_scores will essentially be zero in the correct positions.
         # If this is not correct however, the mask() will need to be fixed to work here for where().
@@ -783,6 +847,9 @@ class Attention:
         scale = 1.0 / math.sqrt(d_head)
         dc_dq = mx.einsum('bhts,bhsk->bhtk', dc_draw_scores, k) * scale
         dc_dk = mx.einsum('bhts,bhtk->bhsk', dc_draw_scores, q) * scale
+
+        if self.use_rope:
+            dc_dq, dc_dk = rope_backward(dc_dq, dc_dk, rope_cos, rope_sin)
 
         dc_dq = mx.transpose(dc_dq, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
         dc_dk = mx.transpose(dc_dk, (0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))

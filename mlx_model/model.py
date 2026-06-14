@@ -1,3 +1,5 @@
+import time
+
 import mlx.core as mx
 import pandas as pd
 from mlx_model import loss_functions
@@ -58,6 +60,8 @@ class Model:
         if verbose >= 0:
             print(f"Training model with {epochs} epochs and learning rate of {learning_rate}...")
 
+        fit_start_time = time.perf_counter()
+
         ema_loss = None
         if save_metrics:
             try:
@@ -69,6 +73,7 @@ class Model:
 
         data_len = len(x)
         for i in range(previously_trained_epochs, epochs):
+            epoch_start_time = time.perf_counter()
             if shuffle:
                 indices = mx.arange(data_len)
                 indices = mx.random.permutation(indices)
@@ -79,6 +84,7 @@ class Model:
 
             idx = 0
             while idx < data_len:
+                batch_start_time = time.perf_counter()
                 curr_batch_size = min(batch_size, data_len - idx)
                 # x_batch = mx.array(x[idx:idx + curr_batch_size])
                 # y_batch = mx.array(y[idx:idx + curr_batch_size])
@@ -93,7 +99,11 @@ class Model:
 
                 a_outputs, z_outputs = self.forward_propagate(x_batch)
                 batch_loss_sum = self.loss_func(y_batch, a_outputs[-1]) * curr_batch_size
-                batch_num_correct = mx.mean(mx.argmax(a_outputs[-1], axis=-1) == mx.argmax(y_batch, axis=-1)) * curr_batch_size
+                if self.loss_func_name in {"sparse_softmax_crossentropy"}:
+                    batch_num_correct = mx.mean(mx.argmax(a_outputs[-1], axis=-1) == y_batch) * curr_batch_size
+                else:
+                    batch_num_correct = mx.mean(mx.argmax(a_outputs[-1], axis=-1) == mx.argmax(y_batch, axis=-1)) * curr_batch_size
+
 
                 self.backward_propagate(a_outputs, z_outputs, y_batch)
 
@@ -121,18 +131,21 @@ class Model:
                 epoch_num_correct += batch_num_correct.item()
                 curr_step += 1
                 if verbose > 1:
-                    print(f"Epoch {i + 1}/{epochs}, Batch {idx // batch_size + (idx % batch_size != 0)}/{(data_len + batch_size - 1) // batch_size}; Loss: {batch_loss_sum.item() / curr_batch_size:.5f}; Accuracy: {batch_num_correct.item() / curr_batch_size:.5f}; EMA Loss: {ema_loss:.5f}; Avg Loss: {epoch_loss_sum / idx:.5f}; Avg Accuracy: {epoch_num_correct / idx:.5f}")
+                    batch_time = time.perf_counter() - batch_start_time
+                    print(f"Epoch {i + 1}/{epochs}, Batch {idx // batch_size + (idx % batch_size != 0)}/{(data_len + batch_size - 1) // batch_size}; Loss: {batch_loss_sum.item() / curr_batch_size:.5f}; Acc: {batch_num_correct.item() / curr_batch_size:.5f}; EMA Loss: {ema_loss:.5f}; Avg Loss: {epoch_loss_sum / idx:.5f}; Avg Acc: {epoch_num_correct / idx:.5f}; Time: {batch_time:.5f}s")
 
             self.curr_loss = epoch_loss_sum / data_len
             self.curr_accuracy = epoch_num_correct / data_len
             if verbose > 0:
-                print(f"Epoch {i+1}/{epochs} finished with average loss of {epoch_loss_sum / data_len:.5f} and average accuracy of {epoch_num_correct / data_len:.5f}")
+                epoch_time = time.perf_counter() - epoch_start_time
+                print(f"Epoch {i+1}/{epochs} finished in {epoch_time:.5f} seconds with average loss of {epoch_loss_sum / data_len:.5f} and average accuracy of {epoch_num_correct / data_len:.5f}")
             if save_after_num_epochs > 0 and (i + 1) % save_after_num_epochs == 0:
                 self.save_as(model_save_path + f"_epoch_{i+1}")
                 if save_metrics:
                     self.metrics.to_csv(model_save_path + "_metrics.csv")
         if verbose >= 0:
-            print("Training completed.")
+            fit_time = time.perf_counter() - fit_start_time
+            print(f"Training completed in {fit_time:.5f} seconds.")
         if save_metrics:
             self.metrics.to_csv(model_save_path + "_metrics.csv")
 
@@ -143,19 +156,20 @@ class Model:
         return y_hat
 
     def test(self, x, y, ohe_y=False):
-        data_len = len(x)
         y_hat = x
         for layer in self.layers:
-            y_hat = layer.get_output(y_hat, data_len)
+            y_hat = layer.get_output(y_hat)
         if ohe_y:
             y = to_ohe(y, y_hat.shape[-1])
-        return mx.mean(mx.argmax(y_hat, axis=-1) == mx.argmax(y, axis=-1)).item()
+        if self.loss_func_name in {"sparse_softmax_crossentropy"}:
+            return mx.mean(mx.argmax(y_hat, axis=-1) == y).item()
+        else:
+            return mx.mean(mx.argmax(y_hat, axis=-1) == mx.argmax(y, axis=-1)).item()
 
     def test_loss(self, x, y, ohe_y=False):
-        data_len = len(x)
         y_hat = x
         for layer in self.layers:
-            y_hat = layer.get_output(y_hat, data_len)
+            y_hat = layer.get_output(y_hat)
         if ohe_y:
             y = to_ohe(y, y_hat.shape[-1])
         return self.loss_func(y, y_hat).item()

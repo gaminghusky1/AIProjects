@@ -1,5 +1,7 @@
 import os, json, hashlib
 import math
+import time
+
 import numpy as np
 import sentencepiece as spm
 import pandas as pd
@@ -212,14 +214,16 @@ def main():
         # print(f"Current Batch: {i+1}")
         x_train, y_train = batcher.sample_batch(batch_size=16, seq_len=seq_len)
         lr_curr = lr_schedule(step=i, total_steps=final_end_batch, peak_lr=peak_lr)
+        batch_start = time.perf_counter()
         tinychat_model.fit(x_train, y_train, epochs=1, learning_rate=lr_curr, batch_size=16, verbose=-1, ohe_y=True)
+        batch_time = time.perf_counter() - batch_start
         curr_accuracy = tinychat_model.get_current_accuracy()
         raw_loss = tinychat_model.get_current_loss()
         if ema_loss is None:
             ema_loss = raw_loss
         else:
             ema_loss = ema_beta * ema_loss + (1 - ema_beta) * raw_loss
-        print(f"Batch {i+1}/{end_batch} finished; Loss: {raw_loss:.5f}, EMA Loss: {ema_loss:.5f}, Accuracy: {curr_accuracy:.5f}")
+        print(f"Batch {i+1}/{end_batch} finished; Loss: {raw_loss:.5f}, EMA Loss: {ema_loss:.5f}, Accuracy: {curr_accuracy:.5f}, Time: {batch_time:.5f}s")
         metrics.loc[i+1] = {"loss": raw_loss, "ema_loss": ema_loss, "accuracy": curr_accuracy}
         batches_since_last_save += 1
         if batches_since_last_save >= save_after_batches:
