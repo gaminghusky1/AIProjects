@@ -19,23 +19,48 @@ def sample_next_token(probs, temperature=1.0):
     probs_np = np.array(probs)
     return int(np.random.choice(len(probs_np), p=probs_np))
 
-def generate_stream(transformer_model, prompt_ids, max_new_tokens=200, temperature=1.0):
+def generate_stream(transformer_model, prompt_ids, max_new_tokens=200, temperature=1.0, max_context=256):
+    prompt_ids = prompt_ids[-max_context:]
     ids = mx.array([prompt_ids], dtype=mx.int32)
 
     generated_ids = []
     running_text = ""
 
+    transformer_model.reset_cache()
+
+    probs = transformer_model.predict(ids)
+    next_probs = probs[0, -1, :]
+
     for _ in range(max_new_tokens):
-        probs = transformer_model.predict(ids)
-        next_probs = probs[0, -1, :]
         next_id = sample_next_token(next_probs, temperature)
+
+        mx.eval(next_probs)
+        mx.clear_cache()
 
         if next_id == inst_id or next_id == slash_inst_id:
             break
 
-        ids = mx.concatenate([ids, mx.array([[next_id]], dtype=mx.int32)], axis=1)
-
         generated_ids.append(next_id)
+
+        # Keep full context ids for returning/truncating.
+        next_token_array = mx.array([[next_id]], dtype=mx.int32)
+        ids = mx.concatenate([ids, next_token_array], axis=1)
+
+        # If context grows beyond max_context, reset cache and prefill again.
+        if ids.shape[1] > max_context:
+            ids = ids[:, -max_context:]
+
+            transformer_model.reset_cache()
+
+            probs = transformer_model.predict(ids)
+            next_probs = probs[0, -1, :]
+
+        else:
+            # Normal cached generation:
+            # feed ONLY the new token, not the whole growing ids.
+            probs = transformer_model.predict(next_token_array)
+            next_probs = probs[0, -1, :]
+
         full_text = sp.DecodeIds(generated_ids)
         new_text = full_text[len(running_text):]
         running_text = full_text
@@ -75,6 +100,7 @@ def main():
         raw_input = input("> ").strip()
         if raw_input == "C":
             accumulated_ids = []
+            transformer_model.reset_cache()
             print("Context Cleared.")
             continue
         user_input = "[INST] " + raw_input + " [/INST] "
@@ -87,7 +113,7 @@ def main():
         print(f"Context Length: {len(accumulated_ids)}")
         print(f"User Tokens: {sp.EncodeAsPieces(user_input)}")
 
-        for event in generate_stream(transformer_model, accumulated_ids, max_new_tokens=100, temperature=0.7):
+        for event in generate_stream(transformer_model, accumulated_ids, max_new_tokens=100, temperature=0.7, max_context=max_context):
             if event["type"] == "token":
                 print(event["text"], end="", flush=True)
             elif event["type"] == "end":

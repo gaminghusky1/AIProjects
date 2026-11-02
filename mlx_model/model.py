@@ -4,8 +4,10 @@ import mlx.core as mx
 import pandas as pd
 from mlx_model import loss_functions
 from mlx_model import optimizers
+from mlx_model import layers
 from pathlib import Path
 import pickle
+
 
 def to_ohe(y_batch, vocab_size):
     b, t = y_batch.shape
@@ -48,12 +50,12 @@ class Model:
 
         return a_outputs, z_outputs
 
-    def backward_propagate(self, a_outputs, z_outputs, y):
-        dc_da = self.loss_func.derivative(y, a_outputs[-1])
+    def backward_propagate(self, a_outputs, z_outputs, y, loss_mask=None):
+        dc_da = self.loss_func.derivative(y, a_outputs[-1], mask=loss_mask)
         for i in reversed(range(len(self.layers))):
             dc_da = self.layers[i].backward_pass(a_outputs[i], z_outputs[i], dc_da)
 
-    def fit(self, x, y, epochs, learning_rate=0.01, lr_function=default_lr_function, augmentation_function=None, curr_step=0, batch_size=1, ema_beta=0.99, shuffle=True, verbose=1, ohe_y=False, previously_trained_epochs=0, save_after_num_epochs=-1, model_save_path="model", save_metrics=False):
+    def fit(self, x, y, epochs, learning_rate=0.01, loss_mask=None, lr_function=default_lr_function, augmentation_function=None, curr_step=0, batch_size=1, ema_beta=0.99, shuffle=True, verbose=1, ohe_y=False, previously_trained_epochs=0, save_after_num_epochs=-1, model_save_path="model", save_metrics=False):
         if not self.compiled:
             raise RuntimeError("Model must be compiled before fitting.")
 
@@ -69,7 +71,7 @@ class Model:
                 curr_step = len(self.metrics)
                 ema_loss = self.metrics.loc[curr_step - 1]["ema_loss"]
             except FileNotFoundError:
-                self.metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy"])
+                self.metrics = pd.DataFrame(columns=["loss", "ema_loss", "accuracy", "learning_rate"])
 
         data_len = len(x)
         for i in range(previously_trained_epochs, epochs):
@@ -78,6 +80,8 @@ class Model:
                 indices = mx.arange(data_len)
                 indices = mx.random.permutation(indices)
                 x, y = x[indices], y[indices]
+                if loss_mask is not None:
+                    loss_mask = loss_mask[indices]
 
             epoch_loss_sum = 0
             epoch_num_correct = 0
@@ -90,6 +94,7 @@ class Model:
                 # y_batch = mx.array(y[idx:idx + curr_batch_size])
                 x_batch = x[idx:idx + curr_batch_size]
                 y_batch = y[idx:idx + curr_batch_size]
+                loss_mask_batch = loss_mask[idx:idx + curr_batch_size] if loss_mask is not None else None
 
                 if augmentation_function is not None:
                     x_batch = mx.stack([augmentation_function(x_batch[i]) for i in range(x_batch.shape[0])], axis=0)
@@ -98,16 +103,17 @@ class Model:
                     y_batch = to_ohe(y_batch, self.layers[-1].get_output_shape()[-1])
 
                 a_outputs, z_outputs = self.forward_propagate(x_batch)
-                batch_loss_sum = self.loss_func(y_batch, a_outputs[-1]) * curr_batch_size
+                batch_loss_sum = self.loss_func(y_batch, a_outputs[-1], mask=loss_mask_batch) * curr_batch_size
                 if self.loss_func_name in {"sparse_softmax_crossentropy"}:
                     batch_num_correct = mx.mean(mx.argmax(a_outputs[-1], axis=-1) == y_batch) * curr_batch_size
                 else:
                     batch_num_correct = mx.mean(mx.argmax(a_outputs[-1], axis=-1) == mx.argmax(y_batch, axis=-1)) * curr_batch_size
 
 
-                self.backward_propagate(a_outputs, z_outputs, y_batch)
+                self.backward_propagate(a_outputs, z_outputs, y_batch, loss_mask=loss_mask_batch)
 
-                self.optimizer.learning_rate = learning_rate * lr_function(curr_step)
+                curr_learning_rate = learning_rate * lr_function(curr_step)
+                self.optimizer.learning_rate = curr_learning_rate
                 param_refs = []
                 grads = []
                 for layer in self.layers:
@@ -126,7 +132,7 @@ class Model:
                 else:
                     ema_loss = ema_beta * ema_loss + (1 - ema_beta) * batch_loss_sum.item() / curr_batch_size
                 if save_metrics:
-                    self.metrics.loc[curr_step] = {"loss": batch_loss_sum.item() / curr_batch_size, "ema_loss": ema_loss, "accuracy": batch_num_correct.item() / curr_batch_size}
+                    self.metrics.loc[curr_step] = {"loss": batch_loss_sum.item() / curr_batch_size, "ema_loss": ema_loss, "accuracy": batch_num_correct.item() / curr_batch_size, "learning_rate": curr_learning_rate}
                 epoch_loss_sum += batch_loss_sum.item()
                 epoch_num_correct += batch_num_correct.item()
                 curr_step += 1
@@ -173,6 +179,14 @@ class Model:
         if ohe_y:
             y = to_ohe(y, y_hat.shape[-1])
         return self.loss_func(y, y_hat).item()
+
+    def reset_cache(self):
+        for layer in self.layers:
+            if isinstance(layer, layers.ResidualBlock):
+                for inner_layer in layer.layers:
+                    if isinstance(inner_layer, layers.Attention):
+                        inner_layer.reset_cache()
+
 
     def get_param_count(self):
         if not self.compiled:

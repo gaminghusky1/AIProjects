@@ -40,7 +40,7 @@ def sliding_window_view(x, window_shape, axis):
     windows = mx.transpose(xhw, (0, 1, 2, 4, 3, 5))
     return windows
 
-def rope_forward(q, k, base=10000.0):
+def rope_forward(q, k, position=0, base=10000.0):
     b, h, t, d = q.shape
 
     if q.shape != k.shape:
@@ -50,7 +50,7 @@ def rope_forward(q, k, base=10000.0):
 
     half_d = d // 2
 
-    positions = mx.arange(t)[:, mx.newaxis]
+    positions = mx.arange(position, position + t)[:, mx.newaxis]
     pair_idx = mx.arange(half_d)[mx.newaxis, :]
 
     inv_freq = 1.0 / (base ** (2 * pair_idx / d))
@@ -513,10 +513,10 @@ class TokenEmbedding:
         self.embedding_size = embedding_size
         self.weights = None
         self.weights_gradient = None
-        self.sequence_len = None
+        self.input_shape = None
 
     def init_weights(self, last_layer_shape):
-        self.sequence_len = last_layer_shape
+        self.input_shape = last_layer_shape
         self.weights = mx.random.normal((self.vocab_size, self.embedding_size)) / math.sqrt(self.embedding_size)
         self.weights_gradient = mx.zeros_like(self.weights)
 
@@ -555,7 +555,7 @@ class TokenEmbedding:
         return math.prod(self.weights.shape)
 
     def get_output_shape(self):
-        return (*self.sequence_len, self.embedding_size)
+        return (*self.input_shape, self.embedding_size)
 
 class PositionalEmbedding:
     def __init__(self, max_sequence_len=512):
@@ -745,6 +745,9 @@ class Attention:
         self.input_shape = None
 
         self.use_rope = use_rope
+        self.k_cache = None
+        self.v_cache = None
+        self.cache_len = 0
 
     def init_weights(self, last_layer_shape):
         self.input_shape = last_layer_shape
@@ -764,8 +767,65 @@ class Attention:
 
         mx.eval(self.w_q, self.w_k, self.w_v, self.w_o, self.b_o, self.w_q_gradient, self.w_k_gradient, self.w_v_gradient, self.w_o_gradient, self.b_o_gradient)
 
+    def reset_cache(self):
+        self.k_cache = None
+        self.v_cache = None
+        self.cache_len = 0
+
+    def cached_forward_pass(self, prev_layer_activations):
+        batch_size = prev_layer_activations.shape[0]
+        sequence_len = prev_layer_activations.shape[1]
+        # t and s are both sequence_length, this is just to distinguish the q dimension and the k dimension for einsum.
+        q = mx.einsum('ik,bti->btk', self.w_q, prev_layer_activations)
+        k = mx.einsum('ik,bsi->bsk', self.w_k, prev_layer_activations)
+        v = mx.einsum('iv,bsi->bsv', self.w_v, prev_layer_activations)
+
+        # split each into heads for multihead attention
+        q = mx.reshape(q, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
+        # print("q after:", q.shape)
+        k = mx.reshape(k, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
+        v = mx.reshape(v, (batch_size, sequence_len, self.heads, -1)).transpose((0, 2, 1, 3))
+
+        if self.use_rope:
+            q, k, _, _ = rope_forward(q, k, position=self.cache_len)
+
+        if self.k_cache is None:
+            self.k_cache = k
+            self.v_cache = v
+        else:
+            self.k_cache = mx.concatenate([self.k_cache, k], axis=2)
+            self.v_cache = mx.concatenate([self.v_cache, v], axis=2)
+        self.cache_len = self.k_cache.shape[2]
+
+        d_head = q.shape[-1]
+        scale = 1.0 / math.sqrt(d_head)
+        raw_scores = mx.einsum('bhtk,bhsk->bhts', q, self.k_cache) * scale
+
+        # Apply causal mask if future tokens exist
+        if sequence_len > 1:
+            total_len = self.k_cache.shape[2]
+            past_len = total_len - sequence_len
+
+            q_positions = mx.arange(past_len, total_len)[:, mx.newaxis]
+            k_positions = mx.arange(total_len)[mx.newaxis, :]
+
+            causal_mask = k_positions <= q_positions
+            causal_mask = causal_mask[mx.newaxis, mx.newaxis, :, :]
+
+            raw_scores = mx.where(causal_mask, raw_scores, -1e9)
+
+        attention_scores = activations.softmax(raw_scores)
+
+        z_output = mx.einsum('bhts,bhsv->bhtv', attention_scores, self.v_cache)
+        z_output = z_output.transpose((0, 2, 1, 3)).reshape((batch_size, sequence_len, -1))
+
+        a_output = mx.einsum('vi,btv->bti', self.w_o, z_output)
+        a_output = a_output + self.b_o
+
+        return a_output
+
     def get_output(self, prev_layer_activations):
-        a_output, z_output = self.forward_pass(prev_layer_activations)
+        a_output = self.cached_forward_pass(prev_layer_activations)
         return a_output
 
     def forward_pass(self, prev_layer_activations):
@@ -914,7 +974,7 @@ class MultilayerPerceptron:
 
         mx.eval(self.up_weights, self.up_biases, self.down_weights, self.down_biases, self.up_weights_gradient, self.up_biases_gradient, self.down_weights_gradient, self.down_biases_gradient)
 
-    def get_ouptut(self, prev_layer_activations):
+    def get_output(self, prev_layer_activations):
         a_output, z_output = self.forward_pass(prev_layer_activations)
         return a_output
 
@@ -977,8 +1037,10 @@ class ResidualBlock:
         self.output_shape = last_layer_shape
 
     def get_output(self, prev_layer_activations):
-        a_output, z_outputs = self.forward_pass(prev_layer_activations)
-        return a_output
+        a_output = prev_layer_activations
+        for layer in self.layers:
+            a_output = layer.get_output(a_output)
+        return a_output + prev_layer_activations
 
     def forward_pass(self, prev_layer_activations):
         a_outputs = [prev_layer_activations]

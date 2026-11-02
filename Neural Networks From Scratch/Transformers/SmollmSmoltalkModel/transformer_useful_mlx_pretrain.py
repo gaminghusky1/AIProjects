@@ -98,8 +98,8 @@ def main():
     #     },
     # )
 
-    prev_trained_batches = 20000
-    end_batch = 22000
+    prev_trained_batches = 25000
+    end_batch = 30000
     final_end_batch = 40000
     useful_model = model.Model.load_from(f"Models/{model_name}_batch_{prev_trained_batches}")
 

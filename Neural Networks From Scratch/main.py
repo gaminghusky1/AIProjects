@@ -1,7 +1,8 @@
 import numpy as np
+import mlx.core as mx
 from keras.datasets import mnist
 from tensorflow.keras.datasets import cifar10
-from base_model import *
+from mlx_model import *
 import pickle
 
 def load_random_images(filepath="random_images.pkl"):
@@ -39,13 +40,13 @@ def load_cifar():
     return x_train, y_train, x_test, y_test
 
 def one_hot(y, classes=10):
-    return np.eye(classes)[y]
+    return mx.eye(classes)[y]
 
 def main():
-    x_train_mnist, y_train_mnist, x_test_mnist, y_test_mnist = load_mnist()
-    x_train_cifar, y_train_cifar, x_test_cifar, y_test_cifar = load_cifar()
-    x_train_small, y_train_small = load_random_images()
-    x_test_small, y_test_small = load_random_images("random_images_test.pkl")
+    x_train_mnist, y_train_mnist, x_test_mnist, y_test_mnist = (mx.array(arr) for arr in load_mnist())
+    x_train_cifar, y_train_cifar, x_test_cifar, y_test_cifar = (mx.array(arr) for arr in load_cifar())
+    x_train_small, y_train_small = (mx.array(arr) for arr in load_random_images())
+    x_test_small, y_test_small = (mx.array(arr) for arr in load_random_images("random_images_test.pkl"))
 
 
     y_train_mnist_oh = one_hot(y_train_mnist)
@@ -103,7 +104,7 @@ def main():
     # test_model.fit(x_train_cifar, y_train_cifar_oh, epochs=1, learning_rate=0.001, batch_size=32, verbose=2)
     # print("Accuracy on test dataset: " + str(test_model.test(x_test_cifar, y_test_cifar_oh)))
 
-    test_model.fit(x_train_mnist, y_train_mnist_oh, epochs=15, learning_rate=0.001, batch_size=32, verbose=2)
+    test_model.fit(x_train_mnist, y_train_mnist_oh, epochs=15, learning_rate=0.001, batch_size=32, verbose=1)
     print("Accuracy on test dataset: " + str(test_model.test(x_test_mnist, y_test_mnist_oh)))
 
     # test_model.save_as("Models/mnist_batched_model")

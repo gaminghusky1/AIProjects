@@ -21,6 +21,8 @@ def main():
          [7, 8]]
     ])
 
+    c = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
+
     # sm_deriv_a = activations.transformer_softmax_derivative(a)
 
     # print(np.einsum('bts,btss->bts', a, sm_deriv_a))
@@ -55,7 +57,8 @@ def main():
     # mask = mx.tril(mx.ones((2, 2), dtype=mx.bool_), k=0)
     # x = mx.where(mask, x, -1e9)
     # print(x)
-    print(np.einsum('bo,boj->bj', a, b))
+    # print(np.einsum('bo,boj->bj', a, b))
+    print(np.argpartition(c, -10)[-10:])
 
 if __name__ == '__main__':
     main()

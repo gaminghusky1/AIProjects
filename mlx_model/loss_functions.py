@@ -1,24 +1,57 @@
 import mlx.core as mx
 import math
 
-def mse(y, y_hat):
-    return mx.mean(mx.power(y - y_hat, 2))
+def mse(y, y_hat, mask=None):
+    loss = mx.power(y - y_hat, 2)
 
-def mse_derivative(y, y_hat):
-    return 2 * (y_hat - y)
+    if mask is None:
+        return mx.mean(loss)
 
-def categorical_crossentropy(y, y_hat):
+    mask = mask.astype(loss.dtype)
+    return mx.sum(loss * mask) / mx.sum(mask)
+
+def mse_derivative(y, y_hat, mask=None):
+    grad = 2 * (y_hat - y)
+
+    if mask is None:
+        return grad / math.prod(y.shape)
+
+    mask = mask.astype(grad.dtype)
+    while len(mask.shape) < len(grad.shape):
+        mask = mask[..., mx.newaxis]
+
+    return grad * mask / mx.sum(mask)
+
+def categorical_crossentropy(y, y_hat, mask=None):
     y_hat = mx.clip(y_hat, 1e-12, 1 - 1e-12)
-    return -mx.sum(y * mx.log(y_hat)) / (math.prod(y.shape) / y.shape[-1])
+    per_item_loss = -mx.sum(y * mx.log(y_hat), axis=-1)
 
-def categorical_crossentropy_derivative(y, y_hat):
+    if mask is None:
+        return mx.mean(per_item_loss)
+
+    return mx.sum(per_item_loss * mask) / mx.sum(mask)
+
+def categorical_crossentropy_derivative(y, y_hat, mask=None):
     y_hat = mx.clip(y_hat, 1e-12, 1 - 1e-12)
-    return (-y / y_hat) / (math.prod(y.shape) / y.shape[-1])
+    grad = -y / y_hat
 
-def softmax_crossentropy_derivative(y, y_hat):
-    return (y_hat - y) / (math.prod(y.shape) / y.shape[-1])
+    if mask is None:
+        return grad / (math.prod(y.shape) / y.shape[-1])
 
-def sparse_softmax_crossentropy(y, y_hat):
+    mask = mask.astype(grad.dtype)
+    return (grad * mask[..., mx.newaxis]) / mx.sum(mask)
+
+def softmax_crossentropy_derivative(y, y_hat, mask=None):
+    grad = y_hat - y
+
+    if mask is None:
+        return grad / (math.prod(y.shape) / y.shape[-1])
+
+    mask = mask.astype(grad.dtype)
+    return (grad * mask[..., mx.newaxis]) / mx.sum(mask)
+
+# Mask should be 1 where loss should be included and 0 elsewhere (ex. 1 at assistant output tokens and 0 at user input tokens)
+def sparse_softmax_crossentropy(y, y_hat, mask=None):
     logits_stable = y_hat - mx.max(y_hat, axis=-1, keepdims=True)
     logsumexp = mx.log(mx.sum(mx.exp(logits_stable), axis=-1))
 
@@ -30,9 +63,16 @@ def sparse_softmax_crossentropy(y, y_hat):
         y
     ]
 
-    return mx.mean(logsumexp - true_logits)
+    per_token_loss = logsumexp - true_logits
 
-def sparse_softmax_crossentropy_derivative(y, y_hat):
+    if mask is None:
+        return mx.mean(per_token_loss)
+
+    mask = mask.astype(per_token_loss.dtype)
+    return mx.sum(per_token_loss * mask) / mx.sum(mask)
+
+# Mask should be 1 where loss should be included and 0 elsewhere (ex. 1 at assistant output tokens and 0 at user input tokens)
+def sparse_softmax_crossentropy_derivative(y, y_hat, mask=None):
     logits_stable = y_hat - mx.max(y_hat, axis=-1, keepdims=True)
     exp_logits = mx.exp(logits_stable)
     probs = exp_logits / mx.sum(exp_logits, axis=-1, keepdims=True)
@@ -46,7 +86,11 @@ def sparse_softmax_crossentropy_derivative(y, y_hat):
         y
     ] -= 1.0
 
-    return grad / (b * t)
+    if mask is None:
+        return grad / (b * t)
+
+    mask = mask.astype(grad.dtype)
+    return (grad * mask[:, :, mx.newaxis]) / mx.sum(mask)
 
 loss_func_dict = {
     'mse': [mse, mse_derivative],
@@ -63,8 +107,8 @@ class LossFunction:
         self.func = func_list[0]
         self.func_deriv = func_list[1]
 
-    def __call__(self, y, y_hat):
-        return self.func(y, y_hat)
+    def __call__(self, y, y_hat, mask=None):
+        return self.func(y, y_hat, mask=mask)
 
-    def derivative(self, y, y_hat):
-        return self.func_deriv(y, y_hat)
+    def derivative(self, y, y_hat, mask=None):
+        return self.func_deriv(y, y_hat, mask=mask)
